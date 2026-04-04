@@ -1,6 +1,7 @@
 const path = require('path');
-const { app, BrowserWindow, ipcMain } = require('electron');
-const { initDb } = require('./db/sqlite.cjs');
+const fs = require('fs');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { initDb, getDb, getDbPath } = require('./db/sqlite.cjs');
 const { registerDbHandlers } = require('./db/ipc/db-handlers.cjs');
 const { registerSyncHandlers } = require('./db/ipc/sync-handlers.cjs');
 const { registerBackupHandlers } = require('./db/ipc/backup-handlers.cjs');
@@ -98,6 +99,61 @@ function createWindow() {
     win.maximize();
     win.show();
   });
+
+  win.on('close', async (event) => {
+    if (win.__adwaaClosingConfirmed) return;
+    event.preventDefault();
+    try {
+      const result = await dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: ['نعم', 'لا'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'نسخة احتياطية',
+        message: 'هل تريد أخذ نسخة احتياطية؟',
+        detail: 'يمكن حفظ نسخة من قاعدة البيانات قبل إغلاق البرنامج.',
+      });
+      if (result.response === 0) {
+        const dateStamp = new Date().toISOString().split('T')[0];
+        const backupName = `backup-${dateStamp}.db`;
+        const preferredDir = app.getPath('documents') || app.getPath('desktop');
+        const outputPath = path.join(preferredDir, backupName);
+        getDb().pragma('wal_checkpoint(TRUNCATE)');
+        fs.copyFileSync(getDbPath(), outputPath);
+      }
+    } catch (error) {
+      console.error(`[adwaa-backup] Close backup failed\n${error?.stack || error?.message || error}`);
+    }
+    win.__adwaaClosingConfirmed = true;
+    win.close();
+  });
+}
+
+async function printHtmlDocument({ html = '', title = 'Adwaa POS Print' } = {}) {
+  if (!html || !String(html).trim()) throw new Error('Missing print HTML payload');
+  const printWin = new BrowserWindow({
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: false,
+    },
+  });
+  try {
+    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(String(html))}`);
+    return await new Promise((resolve, reject) => {
+      printWin.webContents.print({ silent: false, printBackground: true, deviceName: '' }, (success, errorType) => {
+        if (!success) {
+          reject(new Error(errorType || 'print_failed'));
+          return;
+        }
+        resolve({ ok: true, title });
+      });
+    });
+  } finally {
+    if (!printWin.isDestroyed()) {
+      printWin.close();
+    }
+  }
 }
 
 app.whenReady().then(() => {
@@ -109,7 +165,7 @@ app.whenReady().then(() => {
     logSyncError('Initial desktop sync failed during app startup.', error);
   });
   setupAutoUpdater();
-  startSyncScheduler(10000);
+  startSyncScheduler(600000);
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -119,6 +175,15 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopSyncScheduler();
   if (process.platform !== 'darwin') app.quit();
+});
+
+ipcMain.handle('desktop:print-html', async (_event, payload) => {
+  try {
+    return await printHtmlDocument(payload);
+  } catch (error) {
+    console.error(`[adwaa-print] Unable to print document\n${error?.stack || error?.message || error}`);
+    return { ok: false, error: error?.message || 'print_failed' };
+  }
 });
 
 ipcMain.on('window:minimize', (event) => {

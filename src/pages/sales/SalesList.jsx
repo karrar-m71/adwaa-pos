@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import { openProfessionalInvoicePrint } from '../../utils/invoicePrint';
 import { getUnitPriceByMode, PRICE_MODES } from '../../utils/pricing';
 import { getErrorMessage, getExchangeRate, genInvoiceNo, getPreferredCurrency, setPreferredCurrency } from '../../utils/helpers';
+import { getOfflineImagePreview, isOfflineImageRef } from '../../utils/offlineImageQueue';
 import { hasLocalApi, localCreateSale, runLocalSync } from '../../data/api/localApi';
 
 const UI = {
@@ -38,6 +39,17 @@ const genCode = (prefix) => `${prefix}-${Date.now().toString().slice(-6)}${Math.
 const selectFieldValue = (event) => {
   event.currentTarget.select?.();
 };
+const resolveImageUrl = (value = '') => (isOfflineImageRef(value) ? getOfflineImagePreview(value) : value);
+const sortProductsStable = (items = []) => [...items].sort((a, b) => {
+  const aCreated = String(a?.createdAt || '');
+  const bCreated = String(b?.createdAt || '');
+  if (aCreated !== bCreated) return aCreated.localeCompare(bCreated, 'ar');
+  const aName = String(a?.name || '');
+  const bName = String(b?.name || '');
+  const byName = aName.localeCompare(bName, 'ar');
+  if (byName !== 0) return byName;
+  return String(a?.id || '').localeCompare(String(b?.id || ''), 'en');
+});
 const calcLineDiscountAmount = (item = {}, currencyCode = 'IQD', exchangeRate = 1) => {
   const qty = Number(item?.qty || 0);
   const unit = Number(item?.price || 0);
@@ -112,7 +124,7 @@ function ProductPopup({ product, pkg, pos, onClose }) {
       }}>
         <div style={{display:'flex',gap:12,marginBottom:14,alignItems:'center'}}>
           {product.imgUrl
-            ?<img src={product.imgUrl} loading="lazy" decoding="async" style={{width:64,height:64,borderRadius:10,objectFit:'cover'}} alt=""
+            ?<img src={resolveImageUrl(product.imgUrl)} loading="lazy" decoding="async" style={{width:64,height:64,borderRadius:10,objectFit:'cover'}} alt=""
                onError={e=>{e.target.style.display='none';}}/>
             :<div style={{width:64,height:64,borderRadius:10,background:UI.soft,border:`1px solid ${UI.border}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:36}}>{product.img||'📦'}</div>}
           <div>
@@ -164,7 +176,7 @@ const PCard = memo(function PCard({ p, packages, onAdd, onInfo, priceMode }) {
       {low&&<div style={{position:'absolute',top:5,right:5,background:UI.danger,borderRadius:20,padding:'1px 5px',fontSize:8,color:'#fff',fontWeight:700,zIndex:1}}>نفد</div>}
       <div style={{padding:'8px 8px 4px',textAlign:'center'}}>
         {p.imgUrl
-          ?<img src={p.imgUrl} loading="lazy" decoding="async" style={{width:48,height:48,objectFit:'cover',borderRadius:7,marginBottom:4}} alt=""
+          ?<img src={resolveImageUrl(p.imgUrl)} loading="lazy" decoding="async" style={{width:48,height:48,objectFit:'cover',borderRadius:7,marginBottom:4}} alt=""
              onError={e=>{e.target.style.display='none';}}/>
           :<div style={{fontSize:28,marginBottom:4}}>{p.img||'📦'}</div>}
         <div style={{color:UI.text,fontSize:10,fontWeight:600,marginBottom:1,lineHeight:1.3}} title={p.name}>
@@ -202,7 +214,7 @@ const PCard = memo(function PCard({ p, packages, onAdd, onInfo, priceMode }) {
 });
 
 // ── لوحة السلة (فاتورة واحدة) ─────────────────
-const CartPanel = memo(function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode }) {
+const CartPanel = memo(function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode, initialDraft, onDraftApplied }) {
   const [cart,      setCart]       = useState([]);
   const [customer,  setCustomer]   = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -222,6 +234,39 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
     window.addEventListener('cartAdd',handler);
     return()=>window.removeEventListener('cartAdd',handler);
   },[tabId,currency,exchangeRate,allowNeg,priceMode]);
+
+  useEffect(() => {
+    if (!initialDraft) return;
+    try {
+      setCart((initialDraft.items || []).map((item) => ({
+        key: item.key || `${item.id}_${item.sellType || (item.isPackage ? 'package' : 'unit')}`,
+        id: item.id,
+        name: item.name,
+        img: item.img || '',
+        imgUrl: item.imgUrl || '',
+        qty: Number(item.qty || 1),
+        price: Number(item.price || 0),
+        priceIQD: Number(item.priceIQD || 0),
+        sellType: item.sellType || (item.isPackage ? 'package' : 'unit'),
+        isPackage: Boolean(item.isPackage),
+        packageName: item.packageName || '',
+        packageQty: Number(item.packageQty || 1),
+        lineDiscount: Number(item.lineDiscount || 0),
+        lineDiscountType: item.lineDiscountType || 'fixed',
+        stock: Number(item.stock || 0),
+      })));
+      setCustomer(initialDraft.customer || '');
+      setCustomerPhone(initialDraft.customerPhone || '');
+      setCustomerAddress(initialDraft.customerAddress || '');
+      setDiscount(Number(initialDraft.discount || 0));
+      setDiscountType(initialDraft.discountType || 'percent');
+      setReceived(initialDraft.received || '');
+      setAllowNeg(Boolean(initialDraft.allowNeg));
+      onDraftApplied?.(tabId);
+    } catch (error) {
+      console.error('[adwaa-sales] Unable to hydrate draft invoice', error);
+    }
+  }, [initialDraft, onDraftApplied, tabId]);
 
   const addItem=(p,sellType)=>{
     const pkg=packages.find(pk=>pk.id===p.packageTypeId);
@@ -468,13 +513,18 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
   };
 
   const printInv=(inv)=>{
-    const ok = openProfessionalInvoicePrint({
-      ...inv,
-      dueAmount: inv.dueAmount ?? inv.remainingAmount ?? 0,
-      paidAmount: inv.paidAmount ?? Math.max(0, Number(inv.total || 0) - Number(inv.remainingAmount || 0)),
-      customerPhone: inv.customerPhone || customers.find((c)=>c.id===inv.customerId || c.name===inv.customer)?.phone || '',
-    }, 'sale');
-    if(!ok) alert('تعذر فتح نافذة الطباعة. تأكد من السماح بالنوافذ المنبثقة.');
+    try {
+      const ok = openProfessionalInvoicePrint({
+        ...inv,
+        dueAmount: inv.dueAmount ?? inv.remainingAmount ?? 0,
+        paidAmount: inv.paidAmount ?? Math.max(0, Number(inv.total || 0) - Number(inv.remainingAmount || 0)),
+        customerPhone: inv.customerPhone || customers.find((c)=>c.id===inv.customerId || c.name===inv.customer)?.phone || '',
+      }, 'sale');
+      if(!ok) alert('تعذر فتح نافذة الطباعة. تأكد من السماح بالنوافذ المنبثقة.');
+    } catch (error) {
+      console.error('[adwaa-print] Sales invoice print failed', error);
+      alert('تعذر طباعة الفاتورة');
+    }
   };
 
   if(done) return(
@@ -552,7 +602,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
             <div key={item.key} style={{background:UI.soft,borderRadius:10,padding:8,marginBottom:5,border:`1px solid ${item.isPackage?'#d8b4fe':item.qty<0?'#fecaca':UI.border}`}}>
               <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:5}}>
                 {item.imgUrl
-                  ?<img src={item.imgUrl} loading="lazy" decoding="async" style={{width:22,height:22,borderRadius:4,objectFit:'cover'}} alt=""
+                  ?<img src={resolveImageUrl(item.imgUrl)} loading="lazy" decoding="async" style={{width:22,height:22,borderRadius:4,objectFit:'cover'}} alt=""
                      onError={e=>e.target.style.display='none'}/>
                   :<span style={{fontSize:14}}>{item.img||'📦'}</span>}
                 <div style={{flex:1,overflow:'hidden'}}>
@@ -692,12 +742,14 @@ export default function SalesList({ user }) {
   const [showRate,  setShowRate]  = useState(false);
   const [popup,     setPopup]     = useState(null);
   const [priceMode, setPriceMode] = useState('retail');
+  const [listSearchInput,setListSearchInput]= useState('');
   const [listSearch,setListSearch]= useState('');
+  const [draftsByTab,setDraftsByTab] = useState({});
   const deferredSearch = useDeferredValue(search);
 
   useEffect(()=>{
     const us=[
-      onSnapshot(collection(db,'pos_products'),  s=>setProducts(s.docs.map(d=>({...d.data(),id:d.id})))),
+      onSnapshot(collection(db,'pos_products'),  s=>setProducts(sortProductsStable(s.docs.map(d=>({...d.data(),id:d.id}))))),
       onSnapshot(collection(db,'pos_packages'),  s=>setPackages(s.docs.map(d=>({...d.data(),id:d.id})))),
       onSnapshot(collection(db,'pos_customers'), s=>setCustomers(s.docs.map(d=>({...d.data(),id:d.id})))),
       onSnapshot(collection(db,'pos_sales'),     s=>setSales(s.docs.map(d=>({...d.data(),id:d.id})).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)))),
@@ -708,6 +760,13 @@ export default function SalesList({ user }) {
   useEffect(() => {
     setPreferredCurrency(currency);
   }, [currency]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setListSearch(listSearchInput);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [listSearchInput]);
 
   const cats = useMemo(
     () => ['الكل', ...new Set(products.map((p) => p.cat).filter(Boolean))],
@@ -737,25 +796,49 @@ export default function SalesList({ user }) {
     const id = _tabId++;
     setTabs((current) => [...current, { id, label:`إعادة ${sale.invoiceNo || id}` }]);
     setActiveTab(id);
-    if (sale?.currency === 'USD' || sale?.currency === 'IQD') {
-      setCurrency(sale.currency);
-    }
-    setTimeout(() => {
-      (sale?.items || []).forEach((item) => {
-        const product = products.find((p) => p.id === item.id);
-        if (!product) return;
-        const qty = Math.max(1, Number(item.qty || 1));
-        for (let index = 0; index < qty; index += 1) {
-          window.dispatchEvent(new CustomEvent('cartAdd', {
-            detail: {
-              tabId: id,
-              product,
-              sellType: item.sellType || (item.isPackage ? 'package' : 'unit'),
-            },
-          }));
-        }
-      });
-    }, 0);
+    if (sale?.currency === 'USD' || sale?.currency === 'IQD') setCurrency(sale.currency);
+    setDraftsByTab((current) => ({
+      ...current,
+      [id]: {
+        customer: sale.customer || '',
+        customerPhone: sale.customerPhone || '',
+        customerAddress: sale.customerAddress || '',
+        discount: Number(sale.discount || 0),
+        discountType: sale.discountType || 'percent',
+        received: sale.receivedAmount ?? sale.cash ?? '',
+        allowNeg: false,
+        items: (sale.items || []).map((item) => {
+          const product = products.find((p) => p.id === item.id) || {};
+          const sellType = item.sellType || (item.isPackage ? 'package' : 'unit');
+          return {
+            key: `${item.id}_${sellType}`,
+            id: item.id,
+            name: item.name,
+            img: product.img || item.img || '',
+            imgUrl: product.imgUrl || item.imgUrl || '',
+            qty: Number(item.qty || 1),
+            price: Number(item.priceDisplay ?? (sale.currency === 'USD' ? (Number(item.price || 0) / Number(sale.exchangeRate || 1)) : Number(item.price || 0))),
+            priceIQD: Number(item.price || 0),
+            sellType,
+            isPackage: Boolean(item.isPackage),
+            packageName: item.packageName || '',
+            packageQty: Number(item.packageQty || 1),
+            lineDiscount: Number(item.lineDiscount || 0),
+            lineDiscountType: item.lineDiscountType || 'fixed',
+            stock: Number(product.stock || 0),
+          };
+        }),
+      },
+    }));
+  };
+
+  const clearDraftForTab = (tabId) => {
+    setDraftsByTab((current) => {
+      if (!current[tabId]) return current;
+      const next = { ...current };
+      delete next[tabId];
+      return next;
+    });
   };
 
   const closeTab=(id)=>{
@@ -763,6 +846,7 @@ export default function SalesList({ user }) {
     const idx=tabs.findIndex(t=>t.id===id);
     const newTabs=tabs.filter(t=>t.id!==id);
     setTabs(newTabs);
+    clearDraftForTab(id);
     if(activeTab===id)setActiveTab(newTabs[Math.max(0,idx-1)].id);
   };
 
@@ -874,10 +958,10 @@ export default function SalesList({ user }) {
         <div style={{color:UI.text,fontSize:20,fontWeight:800}}>🧾 قائمة فواتير البيع</div>
         <button onClick={()=>setView('pos')} style={{background:UI.accent,color:'#fff',border:'none',borderRadius:12,padding:'9px 18px',fontWeight:800,cursor:'pointer',fontSize:13}}>+ بيع جديد</button>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:8,marginBottom:12}}>
-        <input value={listSearch} onChange={(e)=>setListSearch(e.target.value)} placeholder="بحث برقم الفاتورة / الزبون / التاريخ / الكاشير"
+        <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:8,marginBottom:12}}>
+        <input value={listSearchInput} onChange={(e)=>setListSearchInput(e.target.value)} placeholder="بحث برقم الفاتورة / الزبون / التاريخ / الكاشير"
           style={{width:'100%',background:'#fff',border:`1px solid ${UI.border}`,borderRadius:10,padding:'10px 12px',color:UI.text,fontSize:12,outline:'none',boxSizing:'border-box'}}/>
-        <button onClick={()=>setListSearch('')} style={{background:'#fff',border:`1px solid ${UI.border}`,borderRadius:10,padding:'10px 12px',color:UI.muted,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>
+        <button onClick={()=>{setListSearchInput('');setListSearch('');}} style={{background:'#fff',border:`1px solid ${UI.border}`,borderRadius:10,padding:'10px 12px',color:UI.muted,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>
           إعادة ضبط
         </button>
       </div>
@@ -994,6 +1078,8 @@ export default function SalesList({ user }) {
             <div key={tab.id} style={{display:activeTab===tab.id?'flex':'none',flex:'1 1 340px',maxWidth:'100%'}}>
               <CartPanel tabId={tab.id} products={products} packages={packages}
                 customers={customers} user={user} currency={currency} exchangeRate={rate} priceMode={priceMode}
+                initialDraft={draftsByTab[tab.id] || null}
+                onDraftApplied={clearDraftForTab}
               onClose={()=>closeTab(tab.id)}/>
             </div>
         ))}

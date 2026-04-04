@@ -368,6 +368,16 @@ export function openProfessionalInvoicePrint(invoice, type = 'sale') {
     ? html
     : '<!doctype html><html><body style="font-family:Cairo,Tahoma,Arial,sans-serif;padding:24px">تعذر فتح صفحة الطباعة.</body></html>';
 
+  if (window?.adwaaDesktop?.isDesktop && typeof window.adwaaDesktop.printHtml === 'function') {
+    window.adwaaDesktop.printHtml({
+      html: safeHtml,
+      title: invoice?.invoiceNo || 'Adwaa POS Print',
+    }).catch((error) => {
+      console.error('[adwaa-print] Desktop print failed', error);
+    });
+    return true;
+  }
+
   const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const w = window.open(url, '_blank', 'width=1100,height=800');

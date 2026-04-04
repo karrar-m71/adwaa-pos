@@ -238,7 +238,7 @@ export function onSnapshot(refOrQuery, next, onError) {
 
     fetchNow();
     if (typeof window !== 'undefined') window.addEventListener(LOCAL_EVENT, onLocalChange);
-    timerId = setInterval(fetchNow, docMode ? 1500 : 4000);
+    timerId = setInterval(fetchNow, 600000);
 
     return () => {
       stopped = true;

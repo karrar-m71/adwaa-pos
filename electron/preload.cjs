@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('adwaaDesktop', {
   hide: () => ipcRenderer.send('window:hide'),
   toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
   close: () => ipcRenderer.send('window:close'),
+  printHtml: (payload) => ipcRenderer.invoke('desktop:print-html', payload),
 });
 
 contextBridge.exposeInMainWorld('adwaaLocal', {
