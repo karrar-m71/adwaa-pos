@@ -26,4 +26,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: release
+          path: |
+            release
+            dist
+            out
+            *.exe
