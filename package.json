@@ -1,0 +1,72 @@
+{
+  "name": "adwaa-pos",
+  "private": true,
+  "version": "0.0.0",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "desktop:build": "node scripts/verify-win-build-host.mjs && npm run build && electron-builder --win nsis",
+    "desktop:mac": "npm run build && electron-builder --mac dmg",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "firebase": "^12.11.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^1.7.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.2",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^32.3.3",
+    "electron-builder": "^26.8.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "vite": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.adwaa.pos",
+    "productName": "Adwaa POS",
+    "icon": "icon.png",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      ".env.local"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/build/Release/*.node"
+    ],
+    "npmRebuild": true,
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "Adwaa-POS-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": "dmg",
+      "artifactName": "Adwaa-POS-${version}.${ext}",
+      "category": "public.app-category.business",
+      "icon": "icon.png"
+    }
+  }
+}
