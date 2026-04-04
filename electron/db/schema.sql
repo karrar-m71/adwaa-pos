@@ -152,3 +152,13 @@ CREATE TABLE IF NOT EXISTS app_counters (
   value INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS image_processing_cache (
+  hash TEXT PRIMARY KEY,
+  data_url TEXT NOT NULL,
+  file_name TEXT,
+  mime_type TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_image_processing_cache_updated_at ON image_processing_cache(updated_at DESC);

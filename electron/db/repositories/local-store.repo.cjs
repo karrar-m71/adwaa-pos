@@ -94,16 +94,113 @@ function buildConstraintsFn(constraints = []) {
   };
 }
 
+function isSimpleFieldName(field = '') {
+  return /^[A-Za-z0-9_]+$/.test(String(field || ''));
+}
+
+function buildFieldExpr(field = '') {
+  const normalized = String(field || '').trim();
+  if (!normalized || !isSimpleFieldName(normalized)) return null;
+  if (normalized === 'id' || normalized === 'doc_id') return 'doc_id';
+  if (normalized === 'name' || normalized === 'fromTo') return 'searchable_name';
+  if (normalized === 'barcode') return 'searchable_barcode';
+  if (normalized === 'createdAt') return `json_extract(data_json, '$.createdAt')`;
+  if (normalized === 'updatedAt') return `json_extract(data_json, '$.updatedAt')`;
+  return `json_extract(data_json, '$.${normalized}')`;
+}
+
+function buildSqlConstraints(constraints = []) {
+  const supported = [];
+  const unsupported = [];
+  const whereClauses = [];
+  const params = [];
+  const orderClauses = [];
+  let limitClause = '';
+
+  for (const constraint of Array.isArray(constraints) ? constraints : []) {
+    if (!constraint || !constraint.type) continue;
+
+    if (constraint.type === 'where' && constraint.op === '==') {
+      const fieldExpr = buildFieldExpr(constraint.field);
+      if (!fieldExpr) {
+        unsupported.push(constraint);
+        continue;
+      }
+      if (constraint.value == null) {
+        whereClauses.push(`${fieldExpr} IS NULL`);
+      } else {
+        whereClauses.push(`${fieldExpr} = ?`);
+        params.push(constraint.value);
+      }
+      supported.push(constraint);
+      continue;
+    }
+
+    if (constraint.type === 'orderBy') {
+      const fieldExpr = buildFieldExpr(constraint.field);
+      if (!fieldExpr) {
+        unsupported.push(constraint);
+        continue;
+      }
+      const direction = String(constraint.direction || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+      orderClauses.push(`${fieldExpr} ${direction}`);
+      supported.push(constraint);
+      continue;
+    }
+
+    if (constraint.type === 'limit') {
+      const limitValue = Number(constraint.value || 0);
+      if (!Number.isFinite(limitValue) || limitValue <= 0) {
+        unsupported.push(constraint);
+        continue;
+      }
+      limitClause = ` LIMIT ${Math.floor(limitValue)} `;
+      supported.push(constraint);
+      continue;
+    }
+
+    unsupported.push(constraint);
+  }
+
+  return {
+    supported,
+    unsupported,
+    whereSql: whereClauses.length ? ` AND ${whereClauses.join(' AND ')} ` : '',
+    orderSql: orderClauses.length ? ` ORDER BY ${orderClauses.join(', ')} ` : ' ORDER BY updated_at DESC ',
+    limitSql: limitClause,
+    params,
+  };
+}
+
 function listCollectionDocs(collectionPath, constraints = []) {
   const db = getDb();
-  const rows = db.prepare(`
-    SELECT * FROM documents
-    WHERE collection_name = @collection_name
-      AND is_deleted = 0
-    ORDER BY updated_at DESC
-  `).all({ collection_name: normalizePath(collectionPath) });
-  const docs = rows.map(rowToDoc).map((d) => ({ id: d.id, data: d.data, path: d.path }));
-  return buildConstraintsFn(constraints)(docs);
+  const normalizedCollection = normalizePath(collectionPath);
+  const sqlConstraints = buildSqlConstraints(constraints);
+
+  try {
+    const rows = db.prepare(`
+      SELECT * FROM documents
+      WHERE collection_name = ?
+        AND is_deleted = 0
+        ${sqlConstraints.whereSql}
+      ${sqlConstraints.orderSql}
+      ${sqlConstraints.limitSql}
+    `).all(normalizedCollection, ...sqlConstraints.params);
+    const docs = rows.map(rowToDoc).map((d) => ({ id: d.id, data: d.data, path: d.path }));
+    return sqlConstraints.unsupported.length
+      ? buildConstraintsFn(sqlConstraints.unsupported)(docs)
+      : docs;
+  } catch (error) {
+    console.warn('[adwaa-local-store] SQL constraint fallback:', error?.message || error);
+    const rows = db.prepare(`
+      SELECT * FROM documents
+      WHERE collection_name = ?
+        AND is_deleted = 0
+      ORDER BY updated_at DESC
+    `).all(normalizedCollection);
+    const docs = rows.map(rowToDoc).map((d) => ({ id: d.id, data: d.data, path: d.path }));
+    return buildConstraintsFn(constraints)(docs);
+  }
 }
 
 function getDocument(docPath) {

@@ -31,6 +31,10 @@ const DEFAULT = {
   defaultSpecialProfitMargin: '8',
   exchangeRate: '1480',
   invoiceFooter: 'شكراً لتعاملكم معنا',
+  productImageAutoRemoveBg: false,
+  productImageBgProvider: 'remove_bg',
+  productImageBgApiKey: '',
+  productImageImgbbKey: '',
   language: 'ar',
   dateFormat: 'ar-IQ',
   autoBackup: true,
@@ -314,6 +318,38 @@ export default function AppSettings({ user }) {
           onRemove={() => removeImage('adwaa_watermark', setWatermarkPreview)}
           onUpload={handleImageUpload('adwaa_watermark', setWatermarkPreview)}
         />
+      </Section>
+
+      <Section title="🪄 معالجة صور المواد" color="#0ea5e9">
+        <Row label="تفعيل إزالة الخلفية تلقائيًا" sub="عند رفع صورة مادة، تتم محاولة إزالة الخلفية ثم وضع خلفية بيضاء">
+          {toggle('productImageAutoRemoveBg')}
+        </Row>
+        <Row label="مزود إزالة الخلفية">
+          <select value={settings.productImageBgProvider || 'remove_bg'} onChange={e => setField('productImageBgProvider', e.target.value)} style={{ ...inp, width:180 }}>
+            <option value="remove_bg">remove.bg</option>
+          </select>
+        </Row>
+        <Row label="API Key لإزالة الخلفية" sub="يوضع هنا مفتاح remove.bg. إذا تُرك فارغًا سيتم استخدام الصورة الأصلية المضغوطة">
+          <input
+            type="password"
+            value={settings.productImageBgApiKey || ''}
+            onChange={e => setField('productImageBgApiKey', e.target.value)}
+            placeholder="remove.bg API key"
+            style={{ ...inp, width:280 }}
+          />
+        </Row>
+        <Row label="API Key لرفع الصور إلى ImgBB" sub="اختياري هنا داخل الإعدادات بدل ملف البيئة">
+          <input
+            type="password"
+            value={settings.productImageImgbbKey || ''}
+            onChange={e => setField('productImageImgbbKey', e.target.value)}
+            placeholder="ImgBB API key"
+            style={{ ...inp, width:280 }}
+          />
+        </Row>
+        <div style={{ color:'#64748b', fontSize:11, marginTop:8, lineHeight:1.9 }}>
+          إذا فشلت إزالة الخلفية أو لم يوجد مفتاح API، سيستمر النظام باستخدام الصورة الأصلية بعد ضغطها بدون إيقاف الرفع.
+        </div>
       </Section>
 
       {/* العملة والضرائب */}
