@@ -38,12 +38,3 @@ jobs:
         run: npm run desktop:release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Adwaa-POS-Windows-Installer
-          path: |
-            release/*.exe
-            release/**/*.exe
-          if-no-files-found: error
