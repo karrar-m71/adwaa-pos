@@ -5,7 +5,7 @@ import { accountingStyles, paymentBadgeStyle, statusBadgeStyle } from '../../sty
 import { shareInvoiceOnWhatsApp, explainWhatsAppError } from '../../utils/invoiceSharing';
 import { openProfessionalInvoicePrint } from '../../utils/invoicePrint';
 import { buildSalePricesFromBuyPrice } from '../../utils/pricing';
-import { getErrorMessage, getExchangeRate } from '../../utils/helpers';
+import { getErrorMessage, getExchangeRate, getPreferredCurrency, setPreferredCurrency } from '../../utils/helpers';
 import { hasLocalApi, localCreatePurchase, runLocalSync } from '../../data/api/localApi';
 import Products from '../Products';
 
@@ -88,7 +88,7 @@ function ProductPopup({product,pos,onClose}){
     <div style={{position:'fixed',inset:0,zIndex:900}} onClick={onClose}>
       <div onClick={e=>e.stopPropagation()} style={{position:'fixed',top:Math.min(pos.y,window.innerHeight-340),left:Math.min(pos.x,window.innerWidth-290),zIndex:901,background:'#ffffff',border:'1px solid #f59e0b55',borderRadius:16,padding:18,width:270,boxShadow:'0 8px 40px rgba(0,0,0,0.7)',direction:'rtl'}}>
         <div style={{display:'flex',gap:10,marginBottom:12,alignItems:'center'}}>
-          {product.imgUrl?<img src={product.imgUrl} style={{width:56,height:56,borderRadius:8,objectFit:'cover'}} alt=""/>:<div style={{width:56,height:56,borderRadius:8,background:'#d9e2f2',display:'flex',alignItems:'center',justifyContent:'center',fontSize:30}}>{product.img||'📦'}</div>}
+          {product.imgUrl?<img src={product.imgUrl} loading="lazy" decoding="async" style={{width:56,height:56,borderRadius:8,objectFit:'cover'}} alt=""/>:<div style={{width:56,height:56,borderRadius:8,background:'#d9e2f2',display:'flex',alignItems:'center',justifyContent:'center',fontSize:30}}>{product.img||'📦'}</div>}
           <div>
             <div style={{color:'#fff',fontSize:14,fontWeight:800}}>{product.name}</div>
             <div style={{color:'#64748b',fontSize:10}}>{product.cat} • {product.barcode||'—'}</div>
@@ -435,7 +435,7 @@ export default function PurchaseList({user}){
   const [dateTo,    setDateTo]    = useState('');
   const [selectedPurchase, setSelectedPurchase] = useState(null);
   const [productSearchModal, setProductSearchModal] = useState('');
-  const [carts,     setCarts]     = useState({1:{items:[],supplier:'',supplierPhone:'',supplierAddress:'',paidAmountInput:'',currency:'IQD',date:today(),notes:'',discount:0,discountType:'percent',saving:false,done:null}});
+  const [carts,     setCarts]     = useState({1:{items:[],supplier:'',supplierPhone:'',supplierAddress:'',paidAmountInput:'',currency:getPreferredCurrency(),date:today(),notes:'',discount:0,discountType:'percent',saving:false,done:null}});
 
   useEffect(()=>{
     const us=[
@@ -452,6 +452,10 @@ export default function PurchaseList({user}){
     return(!search||p.name?.includes(search)||p.barcode?.includes(search))&&(catFilter==='الكل'||p.cat===catFilter);
   });
   const activeCurrency = normalizeCurrencyCode((carts[activeTab] || {}).currency || 'IQD');
+
+  useEffect(() => {
+    setPreferredCurrency(activeCurrency);
+  }, [activeCurrency]);
 
   const handleSearchEnter = (event) => {
     if (event.key !== 'Enter') return;
@@ -478,7 +482,7 @@ export default function PurchaseList({user}){
   const addTab=()=>{
     const id=_purchTabId++;
     setTabs(t=>[...t,{id,label:`فاتورة شراء ${id}`}]);
-    setCarts(c=>({...c,[id]:{items:[],supplier:'',supplierPhone:'',supplierAddress:'',paidAmountInput:'',currency:'IQD',date:today(),notes:'',discount:0,discountType:'percent',saving:false,done:null}}));
+    setCarts(c=>({...c,[id]:{items:[],supplier:'',supplierPhone:'',supplierAddress:'',paidAmountInput:'',currency:getPreferredCurrency(),date:today(),notes:'',discount:0,discountType:'percent',saving:false,done:null}}));
     setActiveTab(id);
   };
 
@@ -1226,7 +1230,7 @@ export default function PurchaseList({user}){
                   <div key={p.id} onContextMenu={e=>{e.preventDefault();setPopup({product:p,pkg,pos:{x:Math.min(e.clientX,window.innerWidth-280),y:Math.min(e.clientY,window.innerHeight-350)}});}}
                     style={{background:'#ffffff',borderRadius:11,border:'1px solid #252525',overflow:'hidden',cursor:'context-menu'}}>
                     <div style={{padding:'8px 8px 4px',textAlign:'center'}}>
-                      {p.imgUrl?<img src={p.imgUrl} style={{width:48,height:48,objectFit:'cover',borderRadius:7,marginBottom:4}} alt=""/>
+                      {p.imgUrl?<img src={p.imgUrl} loading="lazy" decoding="async" style={{width:48,height:48,objectFit:'cover',borderRadius:7,marginBottom:4}} alt=""/>
                         :<div style={{fontSize:28,marginBottom:4}}>{p.img||'📦'}</div>}
                       <div style={{color:'#334155',fontSize:10,fontWeight:600,marginBottom:1}}>{p.name?.length>13?p.name.slice(0,13)+'…':p.name}</div>
                       <div style={{color:'#64748b',fontSize:9}}>مخزون: {p.stock||0}</div>
@@ -1304,7 +1308,7 @@ export default function PurchaseList({user}){
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,width:'100%'}}>
                 <button onClick={()=>printPurchase(cart.done)} style={{flex:1,background:'#3b82f6',color:'#fff',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>🖨️ طباعة</button>
                 <button onClick={()=>sharePurchaseToWhatsApp(cart.done)} style={{flex:1,background:'#10b981',color:'#fff',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>واتساب</button>
-                <button onClick={()=>setCarts(c=>({...c,[tab.id]:{items:[],supplier:'',supplierPhone:'',supplierAddress:'',paidAmountInput:'',currency:'IQD',date:today(),notes:'',discount:0,discountType:'percent',saving:false,done:null}}))} style={{flex:1,background:'#f59e0b',color:'#000',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>+ جديدة</button>
+                <button onClick={()=>setCarts(c=>({...c,[tab.id]:{items:[],supplier:'',supplierPhone:'',supplierAddress:'',paidAmountInput:'',currency:getPreferredCurrency(),date:today(),notes:'',discount:0,discountType:'percent',saving:false,done:null}}))} style={{flex:1,background:'#f59e0b',color:'#000',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>+ جديدة</button>
               </div>
             </div>
           );
@@ -1348,7 +1352,7 @@ export default function PurchaseList({user}){
                   :cart.items.map(item=>(
                   <div key={item.key||item.id} style={{background:'#f8fbff',borderRadius:9,padding:7,marginBottom:5,border:'1px solid #1e1e1e'}}>
                     <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:5}}>
-                      {item.imgUrl?<img src={item.imgUrl} style={{width:20,height:20,borderRadius:3,objectFit:'cover'}} alt=""/>:<span style={{fontSize:13}}>{item.img||'📦'}</span>}
+                      {item.imgUrl?<img src={item.imgUrl} loading="lazy" decoding="async" style={{width:20,height:20,borderRadius:3,objectFit:'cover'}} alt=""/>:<span style={{fontSize:13}}>{item.img||'📦'}</span>}
                       <span style={{color:'#334155',fontSize:11,fontWeight:600,flex:1}}>{item.name?.length>18?item.name.slice(0,18)+'…':item.name}</span>
                       {item.isPackage&&<span style={{background:'#e8f1ff',color:'#1f6feb',border:'1px solid #bfdbfe',borderRadius:999,padding:'1px 6px',fontSize:8,fontWeight:800}}>{item.packageName||'تعبئة'} × {item.packageQty||1}</span>}
                       <button onClick={()=>removeFromTab(tab.id,item.key||item.id)} style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:12}}>✕</button>

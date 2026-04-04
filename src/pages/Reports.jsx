@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend } from 'recharts';
 import jsPDF from 'jspdf';
 import { hasLocalApi, localStoreList } from '../data/api/localApi';
+import { getExchangeRate, getPreferredCurrency, setPreferredCurrency, toDisplayAmount } from '../utils/helpers';
 
 const fmt = n => (n||0).toLocaleString('ar-IQ') + ' د.ع';
 const COLORS = ['#F5C800','#10b981','#3b82f6','#ef4444','#a78bfa','#f59e0b','#06b6d4'];
@@ -66,6 +67,15 @@ export default function Reports() {
   const [vouchers, setVouchers] = useState([]);
   const [dateFrom, setDateFrom] = useState(todayISO());
   const [dateTo, setDateTo]     = useState(todayISO());
+  const [reportCurrency, setReportCurrency] = useState(() => getPreferredCurrency());
+
+  useEffect(() => {
+    setPreferredCurrency(reportCurrency);
+  }, [reportCurrency]);
+
+  const fmt = (n) => reportCurrency === 'USD'
+    ? `$${toDisplayAmount(n, 'USD', getExchangeRate()).toFixed(2)}`
+    : (n||0).toLocaleString('ar-IQ') + ' د.ع';
 
   useEffect(() => {
     if (hasLocalApi()) {
@@ -287,6 +297,14 @@ export default function Reports() {
           <span style={{ color:'#64748b' }}>—</span>
           <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
             style={{ color:'#0f172a', outline:'none', fontFamily:"'Cairo'" }}/>
+          <div style={{display:'flex',gap:4,marginRight:6}}>
+            {['IQD','USD'].map((code) => (
+              <button key={code} onClick={() => setReportCurrency(code)}
+                style={{background:reportCurrency===code?'#e8f1ff':'#fff',color:reportCurrency===code?'#1f6feb':'#64748b',border:`1px solid ${reportCurrency===code?'#93c5fd':'#d9e2f2'}`,borderRadius:8,padding:'6px 10px',cursor:'pointer',fontFamily:"'Cairo'",fontSize:11,fontWeight:reportCurrency===code?700:500}}>
+                {code === 'USD' ? 'دولار' : 'دينار'}
+              </button>
+            ))}
+          </div>
           <button onClick={()=>{setDateFrom(todayISO());setDateTo(todayISO());}}
             style={{ background:'#d9e2f2', border:'none', borderRadius:8, padding:'6px 14px', color:'#64748b', cursor:'pointer', fontFamily:"'Cairo'", fontSize:12 }}>إعادة ضبط</button>
           <div style={{ color:curReport?.color, fontSize:14, fontWeight:800, marginRight:'auto' }}>

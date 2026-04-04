@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, doc, setDoc } from 'firebase/firestore';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { collection, onSnapshot, addDoc, doc, getDoc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { openProfessionalInvoicePrint } from '../../utils/invoicePrint';
 import { getUnitPriceByMode, PRICE_MODES } from '../../utils/pricing';
-import { getErrorMessage, getExchangeRate, genInvoiceNo } from '../../utils/helpers';
+import { getErrorMessage, getExchangeRate, genInvoiceNo, getPreferredCurrency, setPreferredCurrency } from '../../utils/helpers';
 import { hasLocalApi, localCreateSale, runLocalSync } from '../../data/api/localApi';
 
 const UI = {
@@ -112,7 +112,7 @@ function ProductPopup({ product, pkg, pos, onClose }) {
       }}>
         <div style={{display:'flex',gap:12,marginBottom:14,alignItems:'center'}}>
           {product.imgUrl
-            ?<img src={product.imgUrl} style={{width:64,height:64,borderRadius:10,objectFit:'cover'}} alt=""
+            ?<img src={product.imgUrl} loading="lazy" decoding="async" style={{width:64,height:64,borderRadius:10,objectFit:'cover'}} alt=""
                onError={e=>{e.target.style.display='none';}}/>
             :<div style={{width:64,height:64,borderRadius:10,background:UI.soft,border:`1px solid ${UI.border}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:36}}>{product.img||'📦'}</div>}
           <div>
@@ -151,7 +151,7 @@ function ProductPopup({ product, pkg, pos, onClose }) {
 }
 
 // ── كارت منتج ──────────────────────────────────
-function PCard({ p, packages, onAdd, onInfo, priceMode }) {
+const PCard = memo(function PCard({ p, packages, onAdd, onInfo, priceMode }) {
   const pkg = packages.find(pk=>pk.id===p.packageTypeId);
   const pkgMeta = resolvePackageMeta(p, pkg);
   const supportsPackage = Boolean(pkgMeta);
@@ -164,7 +164,7 @@ function PCard({ p, packages, onAdd, onInfo, priceMode }) {
       {low&&<div style={{position:'absolute',top:5,right:5,background:UI.danger,borderRadius:20,padding:'1px 5px',fontSize:8,color:'#fff',fontWeight:700,zIndex:1}}>نفد</div>}
       <div style={{padding:'8px 8px 4px',textAlign:'center'}}>
         {p.imgUrl
-          ?<img src={p.imgUrl} style={{width:48,height:48,objectFit:'cover',borderRadius:7,marginBottom:4}} alt=""
+          ?<img src={p.imgUrl} loading="lazy" decoding="async" style={{width:48,height:48,objectFit:'cover',borderRadius:7,marginBottom:4}} alt=""
              onError={e=>{e.target.style.display='none';}}/>
           :<div style={{fontSize:28,marginBottom:4}}>{p.img||'📦'}</div>}
         <div style={{color:UI.text,fontSize:10,fontWeight:600,marginBottom:1,lineHeight:1.3}} title={p.name}>
@@ -199,10 +199,10 @@ function PCard({ p, packages, onAdd, onInfo, priceMode }) {
         </button>}
     </div>
   );
-}
+});
 
 // ── لوحة السلة (فاتورة واحدة) ─────────────────
-function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode }) {
+const CartPanel = memo(function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode }) {
   const [cart,      setCart]       = useState([]);
   const [customer,  setCustomer]   = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -294,6 +294,16 @@ function CartPanel({ tabId, products, packages, customers, user, currency, excha
     if(!cart.length)return alert('السلة فارغة');
     if(payMethod==='آجل'&&!customer.trim())return alert('أدخل اسم الزبون');
     if(!customer.trim() && receivedAmount > total)return alert('لا يمكن أن يكون المبلغ الواصل أكبر من مبلغ الفاتورة عند البيع لزبون عام');
+    if (!allowNeg) {
+      const insufficientItem = cart.find((item) => {
+        const product = products.find((p) => p.id === item.id);
+        const requestedUnits = Number(item.qty || 0) * (item.isPackage ? Number(item.packageQty || 1) : 1);
+        return requestedUnits > Number(product?.stock || 0);
+      });
+      if (insufficientItem) {
+        return alert(`الكمية غير كافية للمادة: ${insufficientItem.name}`);
+      }
+    }
     setSaving(true);
     try{
       const invoiceNo = genInvoiceNo('INV');
@@ -445,7 +455,15 @@ function CartPanel({ tabId, products, packages, customers, user, currency, excha
         sale.linkedVoucherNo = voucherNo;
       }
       setDone(sale);
-    } catch (e) { alert('خطأ في حفظ الفاتورة: ' + getErrorMessage(e)); }
+    } catch (e) {
+      const rawMessage = String(e?.message || '');
+      if (rawMessage.toLowerCase().includes('insufficient stock')) {
+        const productName = rawMessage.split('for ').pop() || '';
+        alert(`الكمية غير كافية${productName ? ` للمادة: ${productName}` : ''}`);
+      } else {
+        alert('خطأ في حفظ الفاتورة: ' + getErrorMessage(e));
+      }
+    }
     setSaving(false);
   };
 
@@ -534,7 +552,7 @@ function CartPanel({ tabId, products, packages, customers, user, currency, excha
             <div key={item.key} style={{background:UI.soft,borderRadius:10,padding:8,marginBottom:5,border:`1px solid ${item.isPackage?'#d8b4fe':item.qty<0?'#fecaca':UI.border}`}}>
               <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:5}}>
                 {item.imgUrl
-                  ?<img src={item.imgUrl} style={{width:22,height:22,borderRadius:4,objectFit:'cover'}} alt=""
+                  ?<img src={item.imgUrl} loading="lazy" decoding="async" style={{width:22,height:22,borderRadius:4,objectFit:'cover'}} alt=""
                      onError={e=>e.target.style.display='none'}/>
                   :<span style={{fontSize:14}}>{item.img||'📦'}</span>}
                 <div style={{flex:1,overflow:'hidden'}}>
@@ -654,7 +672,7 @@ function CartPanel({ tabId, products, packages, customers, user, currency, excha
       </div>
     </div>
   );
-}
+});
 
 // ── المكوّن الرئيسي ────────────────────────────
 let _tabId = 2;
@@ -669,11 +687,13 @@ export default function SalesList({ user }) {
   const [tabs,      setTabs]      = useState([{id:1,label:'فاتورة 1'}]);
   const [activeTab, setActiveTab] = useState(1);
   const [view,      setView]      = useState('pos');
-  const [currency,  setCurrency]  = useState('IQD');
+  const [currency,  setCurrency]  = useState(() => getPreferredCurrency());
   const [rate,      setRate]      = useState(() => getExchangeRate());
   const [showRate,  setShowRate]  = useState(false);
   const [popup,     setPopup]     = useState(null);
   const [priceMode, setPriceMode] = useState('retail');
+  const [listSearch,setListSearch]= useState('');
+  const deferredSearch = useDeferredValue(search);
 
   useEffect(()=>{
     const us=[
@@ -685,12 +705,19 @@ export default function SalesList({ user }) {
     return()=>us.forEach(u=>u());
   },[]);
 
-  const cats=['الكل',...new Set(products.map(p=>p.cat).filter(Boolean))];
-  const filtered=products.filter(p=>{
-    const ms=!search||p.name?.includes(search)||p.barcode?.includes(search)||p.packageBarcode?.includes(search);
-    const mc=catFilter==='الكل'||p.cat===catFilter;
-    return ms&&mc;
-  });
+  useEffect(() => {
+    setPreferredCurrency(currency);
+  }, [currency]);
+
+  const cats = useMemo(
+    () => ['الكل', ...new Set(products.map((p) => p.cat).filter(Boolean))],
+    [products],
+  );
+  const filtered = useMemo(() => products.filter((p) => {
+    const ms = !deferredSearch || p.name?.includes(deferredSearch) || p.barcode?.includes(deferredSearch) || p.packageBarcode?.includes(deferredSearch);
+    const mc = catFilter === 'الكل' || p.cat === catFilter;
+    return ms && mc;
+  }), [products, catFilter, deferredSearch]);
 
   const inferSellTypeFromSearch = (product, queryText = '') => {
     const normalizedQuery = String(queryText || '').trim().toLowerCase();
@@ -704,6 +731,31 @@ export default function SalesList({ user }) {
     const id=_tabId++;
     setTabs(t=>[...t,{id,label:`فاتورة ${id}`}]);
     setActiveTab(id);
+  };
+
+  const repeatSaleIntoNewTab = (sale) => {
+    const id = _tabId++;
+    setTabs((current) => [...current, { id, label:`إعادة ${sale.invoiceNo || id}` }]);
+    setActiveTab(id);
+    if (sale?.currency === 'USD' || sale?.currency === 'IQD') {
+      setCurrency(sale.currency);
+    }
+    setTimeout(() => {
+      (sale?.items || []).forEach((item) => {
+        const product = products.find((p) => p.id === item.id);
+        if (!product) return;
+        const qty = Math.max(1, Number(item.qty || 1));
+        for (let index = 0; index < qty; index += 1) {
+          window.dispatchEvent(new CustomEvent('cartAdd', {
+            detail: {
+              tabId: id,
+              product,
+              sellType: item.sellType || (item.isPackage ? 'package' : 'unit'),
+            },
+          }));
+        }
+      });
+    }, 0);
   };
 
   const closeTab=(id)=>{
@@ -740,6 +792,81 @@ export default function SalesList({ user }) {
     }
   };
 
+  const listSales = useMemo(() => {
+    const q = String(listSearch || '').trim();
+    if (!q) return sales;
+    return sales.filter((sale) => (
+      sale.invoiceNo?.includes(q)
+      || sale.customer?.includes(q)
+      || sale.dateISO?.includes(q)
+      || sale.cashier?.includes(q)
+      || sale.paymentMethod?.includes(q)
+    ));
+  }, [sales, listSearch]);
+
+  const removeSale = async (sale) => {
+    if (!sale?.id) return;
+    if (!confirm(`حذف الفاتورة ${sale.invoiceNo || ''}؟ سيتم عكس أثرها على المخزون والحسابات.`)) return;
+    try {
+      const batch = writeBatch(db);
+      for (const item of sale.items || []) {
+        let product = products.find((p) => p.id === item.id);
+        if (!product) {
+          const snap = await getDoc(doc(db, 'pos_products', item.id));
+          if (snap.exists()) product = { id: snap.id, ...snap.data() };
+        }
+        if (!product) continue;
+        const qtyUnits = item.isPackage
+          ? Number(item.qty || 0) * Math.max(1, Number(item.packageQty || 1))
+          : Number(item.qty || 0);
+        batch.set(doc(db, 'pos_products', item.id), {
+          stock: Number(product.stock || 0) + qtyUnits,
+          soldCount: Math.max(0, Number(product.soldCount || 0) - qtyUnits),
+        }, { merge: true });
+      }
+
+      const customerName = String(sale.customer || '').trim();
+      if (customerName && customerName !== 'زبون عام') {
+        let customerRef = null;
+        if (sale.customerId) {
+          const snap = await getDoc(doc(db, 'pos_customers', sale.customerId));
+          if (snap.exists()) customerRef = { id: snap.id, data: snap.data() };
+        }
+        if (!customerRef) {
+          const found = await getDocs(query(collection(db, 'pos_customers'), where('name', '==', customerName)));
+          if (!found.empty) customerRef = { id: found.docs[0].id, data: found.docs[0].data() };
+        }
+        if (customerRef) {
+          const currencyCode = sale.currency === 'USD' ? 'USD' : 'IQD';
+          const rate = Number(sale.exchangeRate || 1) || 1;
+          const totalDisplay = currencyCode === 'USD' ? Number(sale.total || 0) / rate : Number(sale.total || 0);
+          const dueDisplay = currencyCode === 'USD' ? Number(sale.dueAmount || sale.remainingAmount || 0) / rate : Number(sale.dueAmount || sale.remainingAmount || 0);
+          const nextTotalsByCurrency = applyCurrencyDelta(readTotalByCurrency(customerRef.data), currencyCode, -totalDisplay);
+          const nextDebtByCurrency = applyCurrencyDelta(readDebtByCurrency(customerRef.data), currencyCode, -dueDisplay);
+          batch.set(doc(db, 'pos_customers', customerRef.id), {
+            totalPurchases: Math.max(0, Number(customerRef.data.totalPurchases || 0) - Number(sale.total || 0)),
+            totalPurchasesByCurrency: nextTotalsByCurrency,
+            debt: Math.max(0, Number(nextDebtByCurrency.IQD || 0)),
+            debtByCurrency: nextDebtByCurrency,
+          }, { merge: true });
+        }
+      }
+
+      const linkedVouchers = await getDocs(query(collection(db, 'pos_vouchers'), where('linkedSaleId', '==', sale.id)));
+      linkedVouchers.docs.forEach((voucherDoc) => batch.delete(doc(db, 'pos_vouchers', voucherDoc.id)));
+      batch.delete(doc(db, 'pos_sales', sale.id));
+      await batch.commit();
+    } catch (error) {
+      alert('تعذر حذف الفاتورة: ' + getErrorMessage(error));
+    }
+  };
+
+  const productCards = useMemo(() => filtered.map((p) => (
+    <PCard key={p.id} p={p} packages={packages} priceMode={priceMode}
+      onAdd={handleAdd}
+      onInfo={(e, product, pkg) => setPopup({product, pkg, pos:{x:Math.min(e.clientX,window.innerWidth-295),y:Math.min(e.clientY,window.innerHeight-390)}})}/>
+  )), [filtered, packages, priceMode, activeTab]);
+
   // قائمة المبيعات
   if(view==='list') return(
     <div style={{padding:20,fontFamily:"'Cairo'",direction:'rtl',background:UI.bg,minHeight:'100%'}}>
@@ -747,23 +874,39 @@ export default function SalesList({ user }) {
         <div style={{color:UI.text,fontSize:20,fontWeight:800}}>🧾 قائمة فواتير البيع</div>
         <button onClick={()=>setView('pos')} style={{background:UI.accent,color:'#fff',border:'none',borderRadius:12,padding:'9px 18px',fontWeight:800,cursor:'pointer',fontSize:13}}>+ بيع جديد</button>
       </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:8,marginBottom:12}}>
+        <input value={listSearch} onChange={(e)=>setListSearch(e.target.value)} placeholder="بحث برقم الفاتورة / الزبون / التاريخ / الكاشير"
+          style={{width:'100%',background:'#fff',border:`1px solid ${UI.border}`,borderRadius:10,padding:'10px 12px',color:UI.text,fontSize:12,outline:'none',boxSizing:'border-box'}}/>
+        <button onClick={()=>setListSearch('')} style={{background:'#fff',border:`1px solid ${UI.border}`,borderRadius:10,padding:'10px 12px',color:UI.muted,cursor:'pointer',fontFamily:"'Cairo'",fontSize:12}}>
+          إعادة ضبط
+        </button>
+      </div>
       <div style={{background:UI.panel,borderRadius:14,border:`1px solid ${UI.border}`,overflow:'hidden'}}>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1.3fr 1fr 1fr 1fr 1fr 1fr 1fr',padding:'11px 18px',background:UI.soft,borderBottom:`1px solid ${UI.borderSoft}`}}>
-          {['رقم الفاتورة','الزبون','المبلغ الكلي','الواصل','المتبقي','الدفع','الكاشير','التاريخ'].map(h=>(
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1.3fr 1fr 1fr 1fr 1fr 1fr 1fr auto auto auto',padding:'11px 18px',background:UI.soft,borderBottom:`1px solid ${UI.borderSoft}`}}>
+          {['رقم الفاتورة','الزبون','المبلغ الكلي','الواصل','المتبقي','الدفع','الكاشير','التاريخ','','',''].map(h=>(
             <div key={h} style={{color:UI.muted,fontSize:10,fontWeight:700}}>{h}</div>
           ))}
         </div>
-        {sales.length===0?<div style={{color:UI.subtle,textAlign:'center',padding:60}}>لا توجد فواتير</div>
-          :sales.map((s,i)=>(
-          <div key={s.id} style={{display:'grid',gridTemplateColumns:'1fr 1.3fr 1fr 1fr 1fr 1fr 1fr 1fr',padding:'10px 18px',borderBottom:i<sales.length-1?`1px solid ${UI.borderSoft}`:'none',alignItems:'center',background:i%2===0?'transparent':UI.soft}}>
+        {listSales.length===0?<div style={{color:UI.subtle,textAlign:'center',padding:60}}>لا توجد فواتير</div>
+          :listSales.map((s,i)=>(
+          <div key={s.id} style={{display:'grid',gridTemplateColumns:'1fr 1.3fr 1fr 1fr 1fr 1fr 1fr 1fr auto auto auto',padding:'10px 18px',borderBottom:i<listSales.length-1?`1px solid ${UI.borderSoft}`:'none',alignItems:'center',background:i%2===0?'transparent':UI.soft}}>
             <div style={{color:UI.success,fontSize:11,fontWeight:700}}>{s.invoiceNo}</div>
             <div style={{color:UI.text,fontSize:11}}>{s.customer}</div>
-            <div style={{color:UI.accent,fontSize:12,fontWeight:800}}>{(s.total||0).toLocaleString('ar-IQ')} د.ع</div>
-            <div style={{color:UI.info,fontSize:11,fontWeight:700}}>{(s.receivedAmount ?? s.cash ?? 0).toLocaleString('ar-IQ')} د.ع</div>
-            <div style={{color:(s.remainingAmount||0)>0?'#f59e0b':UI.success,fontSize:11,fontWeight:700}}>{(s.remainingAmount||0).toLocaleString('ar-IQ')} د.ع</div>
+            <div style={{color:UI.accent,fontSize:12,fontWeight:800}}>{fmtCur(toDisplay(s.total||0,s.currency||'IQD',s.exchangeRate||1),s.currency||'IQD')}</div>
+            <div style={{color:UI.info,fontSize:11,fontWeight:700}}>{fmtCur(toDisplay((s.receivedAmount ?? s.cash ?? 0),s.currency||'IQD',s.exchangeRate||1),s.currency||'IQD')}</div>
+            <div style={{color:(s.remainingAmount||0)>0?'#f59e0b':UI.success,fontSize:11,fontWeight:700}}>{fmtCur(toDisplay((s.remainingAmount||0),s.currency||'IQD',s.exchangeRate||1),s.currency||'IQD')}</div>
             <span style={{background:s.paymentMethod==='آجل'?'#fff7ed':s.paymentMethod==='نقدي'?UI.successSoft:UI.infoSoft,borderRadius:20,padding:'2px 7px',color:s.paymentMethod==='آجل'?'#f59e0b':s.paymentMethod==='نقدي'?UI.success:UI.info,fontSize:9,fontWeight:700,display:'inline-block'}}>{s.paymentMethod}</span>
             <div style={{color:UI.muted,fontSize:10}}>{s.cashier}</div>
             <div style={{color:UI.subtle,fontSize:9}}>{s.dateISO}</div>
+            <button onClick={() => printInv(s)} style={{background:UI.infoSoft,border:'1px solid #93c5fd',borderRadius:8,padding:'4px 10px',color:UI.info,fontSize:10,cursor:'pointer',fontFamily:"'Cairo'",fontWeight:700}}>
+              طباعة
+            </button>
+            <button onClick={() => repeatSaleIntoNewTab(s)} style={{background:UI.accentSoft,border:'1px solid #fcd34d',borderRadius:8,padding:'4px 10px',color:UI.accent,fontSize:10,cursor:'pointer',fontFamily:"'Cairo'",fontWeight:700}}>
+              تعديل
+            </button>
+            <button onClick={() => removeSale(s)} style={{background:UI.dangerSoft,border:'1px solid #fca5a5',borderRadius:8,padding:'4px 10px',color:UI.danger,fontSize:10,cursor:'pointer',fontFamily:"'Cairo'",fontWeight:700}}>
+              حذف
+            </button>
           </div>
         ))}
       </div>
@@ -841,11 +984,7 @@ export default function SalesList({ user }) {
           </div>
           <div style={{flex:1,overflowY:'auto',padding:8,minHeight:280}}>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(120px, 1fr))',gap:7}}>
-              {filtered.map(p=>(
-                <PCard key={p.id} p={p} packages={packages} priceMode={priceMode}
-                  onAdd={handleAdd}
-                  onInfo={(e,p,pkg)=>setPopup({product:p,pkg,pos:{x:Math.min(e.clientX,window.innerWidth-295),y:Math.min(e.clientY,window.innerHeight-390)}})}/>
-              ))}
+              {productCards}
             </div>
           </div>
         </div>

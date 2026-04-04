@@ -40,6 +40,11 @@ const makeCollectionSnapshot = (docs) => ({
   forEach: (cb) => docs.forEach(cb),
 });
 
+const docSignature = (id, payload) => JSON.stringify([id, payload || null]);
+const collectionSignature = (rows = []) => JSON.stringify(
+  rows.map((row) => [row?.id || '', row?.data || null]),
+);
+
 const makeDocRef = (path) => ({
   __localType: 'doc',
   id: toDocId(path),
@@ -196,16 +201,24 @@ export function onSnapshot(refOrQuery, next, onError) {
 
     let stopped = false;
     let timerId = null;
+    let lastSignature = null;
 
     const fetchNow = async () => {
       if (stopped) return;
       try {
         if (docMode) {
           const found = await window.adwaaLocal.store.get(path);
-          next(makeDocSnapshot(toDocId(path), found?.data || null));
+          const payload = found?.data || null;
+          const nextSignature = docSignature(toDocId(path), payload);
+          if (nextSignature === lastSignature) return;
+          lastSignature = nextSignature;
+          next(makeDocSnapshot(toDocId(path), payload));
           return;
         }
         const rows = await window.adwaaLocal.store.list(path, constraints);
+        const nextSignature = collectionSignature(rows);
+        if (nextSignature === lastSignature) return;
+        lastSignature = nextSignature;
         const docs = rows.map((r) => makeDocSnapshot(r.id, r.data || {}));
         next(makeCollectionSnapshot(docs));
       } catch (err) {
@@ -225,7 +238,7 @@ export function onSnapshot(refOrQuery, next, onError) {
 
     fetchNow();
     if (typeof window !== 'undefined') window.addEventListener(LOCAL_EVENT, onLocalChange);
-    timerId = setInterval(fetchNow, 1200);
+    timerId = setInterval(fetchNow, docMode ? 1500 : 4000);
 
     return () => {
       stopped = true;

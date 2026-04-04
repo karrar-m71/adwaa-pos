@@ -41,6 +41,27 @@ export const getExchangeRate = () => {
   }
 };
 
+/** الحصول على العملة المفضلة من التخزين المحلي */
+export const getPreferredCurrency = () => {
+  try {
+    const settings = JSON.parse(localStorage.getItem('adwaa_settings') || '{}');
+    return settings.preferredCurrency === 'USD' ? 'USD' : 'IQD';
+  } catch {
+    return 'IQD';
+  }
+};
+
+/** حفظ العملة المفضلة في التخزين المحلي */
+export const setPreferredCurrency = (currency = 'IQD') => {
+  try {
+    const settings = JSON.parse(localStorage.getItem('adwaa_settings') || '{}');
+    settings.preferredCurrency = currency === 'USD' ? 'USD' : 'IQD';
+    localStorage.setItem('adwaa_settings', JSON.stringify(settings));
+  } catch {
+    // noop
+  }
+};
+
 /** تحويل IQD إلى قيمة عرض حسب العملة */
 export const toDisplayAmount = (amountIQD, currency, rate) => {
   const r = rate || getExchangeRate();

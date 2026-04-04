@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildSalePricesFromBuyPrice, readPricingSettings } from '../utils/pricing';
@@ -70,6 +70,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   const [syncMsg,  setSyncMsg]    = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [pricingSettings, setPricingSettings] = useState(() => readPricingSettings());
+  const deferredSearch = useDeferredValue(search);
 
   const empty = {
     name:'', barcode:'', cat:'إضاءة', img:'📦', imgUrl:'',
@@ -125,12 +126,12 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     ? (((specialPriceValue - buyPriceValue) / buyPriceValue) * 100)
     : 0;
 
-  const filtered = products.filter(p=>{
-    const matchCat    = catFilter==='الكل'||p.cat===catFilter;
-    const matchPkg    = pkgFilter==='الكل'||(pkgFilter==='معبأ'&&p.hasPackage)||(pkgFilter==='غير معبأ'&&!p.hasPackage);
-    const matchSearch = !search||p.name?.includes(search)||p.barcode?.includes(search);
-    return matchCat&&matchPkg&&matchSearch;
-  });
+  const filtered = useMemo(() => products.filter((p) => {
+    const matchCat = catFilter === 'الكل' || p.cat === catFilter;
+    const matchPkg = pkgFilter === 'الكل' || (pkgFilter === 'معبأ' && p.hasPackage) || (pkgFilter === 'غير معبأ' && !p.hasPackage);
+    const matchSearch = !deferredSearch || p.name?.includes(deferredSearch) || p.barcode?.includes(deferredSearch);
+    return matchCat && matchPkg && matchSearch;
+  }), [products, catFilter, pkgFilter, deferredSearch]);
 
   const save = async () => {
     if (!(editing ? canEdit : canCreate)) return alert('ليس لديك صلاحية لتعديل المواد');
@@ -273,6 +274,51 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     setTimeout(()=>setSyncMsg(''), 5000);
   };
 
+  const productRows = useMemo(() => filtered.map((p, i) => {
+    const pkg = packages.find((pk) => pk.id === p.packageTypeId);
+    return (
+      <div key={p.id} style={{display:'grid',gridTemplateColumns:'2.5fr 1fr 1fr 1fr 1fr 1fr 1fr',padding:'12px 20px',borderBottom:i<filtered.length-1?'1px solid #F1F5F9':'none',alignItems:'center'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {p.imgUrl
+            ?<img src={resolveImageUrl(p.imgUrl)} loading="lazy" decoding="async" alt="" style={{width:32,height:32,borderRadius:6,objectFit:'cover'}} onError={e=>e.target.style.display='none'}/>
+            :<span style={{fontSize:22}}>{p.img||'📦'}</span>}
+          <div>
+            <div style={{color:'#18243A',fontSize:13,fontWeight:600}}>{p.name}</div>
+            <div style={{display:'flex',gap:5,marginTop:2}}>
+              {p.barcode&&<span style={{color:'#94A3B8',fontSize:10}}>{p.barcode}</span>}
+              {p.hasPackage&&<span style={{background:'#a78bfa22',border:'1px solid #a78bfa44',borderRadius:20,padding:'1px 6px',color:'#a78bfa',fontSize:9,fontWeight:700}}>معبأ</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{color:'#64748B',fontSize:12}}>{p.cat}</div>
+        <div style={{color:'#64748B',fontSize:12}}>{fmt(p.buyPrice)}</div>
+        <div style={{color:'#F5C800',fontSize:13,fontWeight:700}}>{fmt(p.sellPrice)}</div>
+        <div>
+          {p.hasPackage&&pkg
+            ?<div style={{background:'#a78bfa22',borderRadius:8,padding:'4px 8px'}}>
+              <div style={{color:'#a78bfa',fontSize:11,fontWeight:700}}>{pkg.name}</div>
+              <div style={{color:'#64748B',fontSize:10}}>{p.packageQty||pkg.qty} {pkg.unit}</div>
+              {p.packagePrice&&<div style={{color:'#10b981',fontSize:10}}>{fmt(p.packagePrice)}</div>}
+            </div>
+            :<span style={{color:'#94A3B8',fontSize:11}}>—</span>}
+        </div>
+        <div>
+          <span style={{background:(p.stock||0)<=(p.minStock||5)?'#ef444422':'#10b98122',border:`1px solid ${(p.stock||0)<=(p.minStock||5)?'#ef444444':'#10b98144'}`,borderRadius:20,padding:'3px 10px',color:(p.stock||0)<=(p.minStock||5)?'#ef4444':'#10b981',fontSize:12,fontWeight:700}}>
+            {p.stock||0}
+          </span>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          <button onClick={()=>edit(p)}
+            style={{background:'#F5C80022',border:'1px solid #F5C80044',borderRadius:8,padding:'5px 10px',color:'#F5C800',fontSize:12,cursor:'pointer'}}>✏️</button>
+          {canDelete&&(
+            <button onClick={()=>del(p.id,p.name)}
+              style={{background:'#ef444422',border:'1px solid #ef444444',borderRadius:8,padding:'5px 10px',color:'#ef4444',fontSize:12,cursor:'pointer'}}>🗑️</button>
+          )}
+        </div>
+      </div>
+    );
+  }), [filtered, packages, canDelete]);
+
   const autoPackagePrice = form.packageQty && form.sellPrice
     ? Number(form.sellPrice) * Number(form.packageQty) : null;
   const priceHints = buildSalePricesFromBuyPrice(form.buyPrice, pricingSettings);
@@ -353,7 +399,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
             {/* معاينة الصورة */}
             {form.imgUrl&&(
               <div style={{gridColumn:'1/-1',display:'flex',gap:12,alignItems:'center'}}>
-                <img src={resolveImageUrl(form.imgUrl)} alt="معاينة" style={{width:60,height:60,borderRadius:10,objectFit:'cover',border:'1px solid #333'}}
+                <img src={resolveImageUrl(form.imgUrl)} loading="lazy" decoding="async" alt="معاينة" style={{width:60,height:60,borderRadius:10,objectFit:'cover',border:'1px solid #333'}}
                   onError={e=>{e.target.style.display='none';}}/>
                 <span style={{color:'#10b981',fontSize:12}}>✅ الصورة محمّلة</span>
               </div>
@@ -547,50 +593,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
         </div>
         {filtered.length===0
           ?<div style={{color:'#94A3B8',textAlign:'center',padding:60}}>لا توجد مواد</div>
-          :filtered.map((p,i)=>{
-            const pkg=packages.find(pk=>pk.id===p.packageTypeId);
-            return(
-              <div key={p.id} style={{display:'grid',gridTemplateColumns:'2.5fr 1fr 1fr 1fr 1fr 1fr 1fr',padding:'12px 20px',borderBottom:i<filtered.length-1?'1px solid #F1F5F9':'none',alignItems:'center'}}>
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  {p.imgUrl
-                    ?<img src={resolveImageUrl(p.imgUrl)} alt="" style={{width:32,height:32,borderRadius:6,objectFit:'cover'}} onError={e=>e.target.style.display='none'}/>
-                    :<span style={{fontSize:22}}>{p.img||'📦'}</span>}
-                  <div>
-                    <div style={{color:'#18243A',fontSize:13,fontWeight:600}}>{p.name}</div>
-                    <div style={{display:'flex',gap:5,marginTop:2}}>
-                      {p.barcode&&<span style={{color:'#94A3B8',fontSize:10}}>{p.barcode}</span>}
-                      {p.hasPackage&&<span style={{background:'#a78bfa22',border:'1px solid #a78bfa44',borderRadius:20,padding:'1px 6px',color:'#a78bfa',fontSize:9,fontWeight:700}}>معبأ</span>}
-                    </div>
-                  </div>
-                </div>
-                <div style={{color:'#64748B',fontSize:12}}>{p.cat}</div>
-                <div style={{color:'#64748B',fontSize:12}}>{fmt(p.buyPrice)}</div>
-                <div style={{color:'#F5C800',fontSize:13,fontWeight:700}}>{fmt(p.sellPrice)}</div>
-                <div>
-                  {p.hasPackage&&pkg
-                    ?<div style={{background:'#a78bfa22',borderRadius:8,padding:'4px 8px'}}>
-                      <div style={{color:'#a78bfa',fontSize:11,fontWeight:700}}>{pkg.name}</div>
-                      <div style={{color:'#64748B',fontSize:10}}>{p.packageQty||pkg.qty} {pkg.unit}</div>
-                      {p.packagePrice&&<div style={{color:'#10b981',fontSize:10}}>{fmt(p.packagePrice)}</div>}
-                    </div>
-                    :<span style={{color:'#94A3B8',fontSize:11}}>—</span>}
-                </div>
-                <div>
-                  <span style={{background:(p.stock||0)<=(p.minStock||5)?'#ef444422':'#10b98122',border:`1px solid ${(p.stock||0)<=(p.minStock||5)?'#ef444444':'#10b98144'}`,borderRadius:20,padding:'3px 10px',color:(p.stock||0)<=(p.minStock||5)?'#ef4444':'#10b981',fontSize:12,fontWeight:700}}>
-                    {p.stock||0}
-                  </span>
-                </div>
-                <div style={{display:'flex',gap:6}}>
-                  <button onClick={()=>edit(p)}
-                    style={{background:'#F5C80022',border:'1px solid #F5C80044',borderRadius:8,padding:'5px 10px',color:'#F5C800',fontSize:12,cursor:'pointer'}}>✏️</button>
-                  {canDelete&&(
-                    <button onClick={()=>del(p.id,p.name)}
-                      style={{background:'#ef444422',border:'1px solid #ef444444',borderRadius:8,padding:'5px 10px',color:'#ef4444',fontSize:12,cursor:'pointer'}}>🗑️</button>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          :productRows
         }
       </div>
     </div>

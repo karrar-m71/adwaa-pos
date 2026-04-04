@@ -109,26 +109,19 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     const accountTotalLabel = isSale ? 'مبلغ الحساب الكلي' : 'مبلغ الحساب الكلي';
 
     const rowsHtml = rows.map((item, idx) => {
-    const unitPrice = Number(item?.price ?? item?.buyPrice ?? 0);
-    const itemDiscount = lineDiscount(item);
-    return `
-      <tr>
-        <td>${idx + 1}</td>
-        <td>${esc(item?.name || '-')}</td>
-        <td>${Number(item?.qty ?? item?.returnQty ?? 0)}</td>
-        <td>${money(unitPrice)}</td>
-        <td>${money(itemDiscount)}</td>
-        <td>${money(lineTotal(item))}</td>
-      </tr>
-    `;
+      const unitPrice = Number(item?.price ?? item?.buyPrice ?? 0);
+      const itemDiscount = lineDiscount(item);
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${esc(item?.name || '-')}</td>
+          <td>${Number(item?.qty ?? item?.returnQty ?? 0)}</td>
+          <td>${moneyWithDisplay(unitPrice, currencyCode, exchangeRate)}</td>
+          <td>${moneyWithDisplay(itemDiscount, currencyCode, exchangeRate)}</td>
+          <td>${moneyWithDisplay(lineTotal(item), currencyCode, exchangeRate)}</td>
+        </tr>
+      `;
     }).join('');
-
-    const padRows = Math.max(0, 12 - rows.length);
-    const emptyRows = Array.from({ length: padRows }).map(() => `
-    <tr>
-      <td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td>
-    </tr>
-    `).join('');
 
     const titleText = isSaleReturn
       ? 'فاتورة إرجاع بيع'
@@ -144,7 +137,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
   <meta charset="utf-8" />
   <title>Invoice ${esc(invoice.invoiceNo || '')}</title>
   <style>
-    @page { size: A4; margin: 10mm; }
+    @page { size: auto; margin: 4mm; }
     * { box-sizing: border-box; }
     body { font-family: "Cairo", Tahoma, Arial, sans-serif; margin: 0; color: #111827; background: #fff; }
     .invoice { width: 100%; border: 1px solid #d1d5db; padding: 10px; position: relative; overflow: hidden; border-radius: 18px; }
@@ -168,9 +161,13 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     .meta .box div:nth-last-child(-n+2) { border-bottom: 0; }
     .meta .box div:nth-child(odd) { background: #f3f4f6; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { border: 1px solid #9ca3af; padding: 4px 6px; font-size: 12px; text-align: center; }
+    th, td { border: 1px solid #9ca3af; padding: 4px 6px; font-size: 11px; text-align: center; }
     th { background: #f3f4f6; font-weight: 800; }
     td:nth-child(2) { text-align: right; }
+    .compact-meta { margin-top: 8px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+    .compact-chip { border: 1px solid #d1d5db; border-radius: 10px; padding: 6px 8px; background: #f8fafc; }
+    .compact-chip .label { color: #64748b; font-size: 10px; margin-bottom: 2px; }
+    .compact-chip .value { color: #0f172a; font-size: 11px; font-weight: 800; }
     .info-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .info-box { border: 1px solid #d1d5db; border-radius: 12px; overflow: hidden; }
     .info-box-title { background: #f8fafc; padding: 8px 10px; font-size: 12px; font-weight: 800; color: #334155; border-bottom: 1px solid #e5e7eb; }
@@ -189,7 +186,31 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     .signs { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; text-align: center; font-size: 12px; }
     .line { margin-top: 26px; border-top: 1px dashed #6b7280; }
     .footer { margin-top: 10px; text-align: center; font-size: 11px; color: #6b7280; }
-    @media print { .no-print { display: none !important; } }
+    @media print {
+      .no-print { display: none !important; }
+      body { background: #fff; }
+      .invoice {
+        width: 76mm;
+        max-width: 76mm;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        margin: 0 auto;
+      }
+      .header-image-wrap, .watermark, .signs { display: none !important; }
+      .head { grid-template-columns: 1fr; gap: 6px; padding-bottom: 6px; }
+      .brand .name { font-size: 22px; }
+      .brand .sub, .phones { font-size: 10px; }
+      .meta .title { font-size: 14px; margin-bottom: 4px; }
+      .meta .box { grid-template-columns: 90px 1fr; font-size: 10px; }
+      .meta .box div { padding: 3px 5px; }
+      table { margin-top: 6px; }
+      th, td { font-size: 10px; padding: 3px 4px; }
+      .compact-meta { grid-template-columns: 1fr 1fr; }
+      .info-grid, .totals, .accounting { grid-template-columns: 1fr; gap: 6px; margin-top: 6px; }
+      .info-box-title, .totals .row div, .notes, .footer { font-size: 10px; }
+      .notes { min-height: 20px; padding: 5px; }
+    }
   </style>
 </head>
 <body>
@@ -242,15 +263,21 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
         </div>
       `}
 
+      <div class="compact-meta">
+        <div class="compact-chip"><div class="label">الدفع</div><div class="value">${esc(invoice.paymentMethod || '-')}</div></div>
+        <div class="compact-chip"><div class="label">حالة السداد</div><div class="value">${esc(paymentStatus)}</div></div>
+        <div class="compact-chip"><div class="label">المنظم</div><div class="value">${esc(createdBy)}</div></div>
+        <div class="compact-chip"><div class="label">العملة</div><div class="value">${currencyCode === 'USD' ? 'دولار' : 'دينار'}</div></div>
+      </div>
+
       <div class="info-grid">
         <div class="info-box">
           <div class="info-box-title">بيانات الفاتورة</div>
           <div class="totals" style="margin-top:0;grid-template-columns:1fr;">
             <div class="box" style="border:none;">
               <div class="row"><div>نوع الفاتورة</div><div>${esc(titleText)}</div></div>
-              <div class="row"><div>طريقة الدفع</div><div>${esc(invoice.paymentMethod || '-')}</div></div>
-              <div class="row"><div>حالة السداد</div><div><span class="badge ${due > 0 ? 'warn' : 'success'}">${esc(paymentStatus)}</span></div></div>
-              <div class="row"><div>منظم الفاتورة</div><div>${esc(createdBy)}</div></div>
+              <div class="row"><div>${isSale ? 'الهاتف' : 'هاتف المورد'}</div><div>${esc(partyPhone)}</div></div>
+              <div class="row"><div>${isSale ? 'العنوان' : 'العنوان'}</div><div>${esc(partyAddress)}</div></div>
               ${currencyCode === 'USD' ? `<div class="row"><div>سعر الصرف</div><div>${esc(exchangeRate)}</div></div>` : ''}
             </div>
           </div>
@@ -282,7 +309,6 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
         </thead>
         <tbody>
           ${rowsHtml}
-          ${emptyRows}
         </tbody>
       </table>
 
