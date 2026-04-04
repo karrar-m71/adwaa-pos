@@ -296,7 +296,6 @@ async function pullMobileProductsToPos() {
 
   for (const collectionName of pullCollections) {
     try {
-      // eslint-disable-next-line no-await-in-loop
       const docs = await listCollectionDocs(collectionName);
       scanned += docs.length;
       let importedInCollection = 0;

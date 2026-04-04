@@ -1,4 +1,4 @@
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot, addDoc, doc, getDoc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { openProfessionalInvoicePrint } from '../../utils/invoicePrint';
@@ -96,6 +96,41 @@ const resolvePackageMeta = (product = {}, pkg = null) => {
     unit: String(pkg?.unit || 'وحدة'),
   };
 };
+const createEditSession = (draft) => (
+  draft?.mode === 'edit' && draft?.invoiceId
+    ? {
+        mode: 'edit',
+        invoiceId: draft.invoiceId,
+        invoiceNo: draft.invoiceNo || '',
+        createdAt: draft.createdAt || '',
+        dateISO: draft.dateISO || '',
+        date: draft.date || '',
+        originalQtyByProduct: (draft.items || []).reduce((acc, item) => {
+          if (!item?.id) return acc;
+          const qtyUnits = Number(item.qty || 0) * (item.isPackage ? Number(item.packageQty || 1) : 1);
+          acc[item.id] = Number(acc[item.id] || 0) + qtyUnits;
+          return acc;
+        }, {}),
+      }
+    : null
+);
+const createDraftCart = (draft) => (draft?.items || []).map((item) => ({
+  key: item.key || `${item.id}_${item.sellType || (item.isPackage ? 'package' : 'unit')}`,
+  id: item.id,
+  name: item.name,
+  img: item.img || '',
+  imgUrl: item.imgUrl || '',
+  qty: Number(item.qty || 1),
+  price: Number(item.price || 0),
+  priceIQD: Number(item.priceIQD || 0),
+  sellType: item.sellType || (item.isPackage ? 'package' : 'unit'),
+  isPackage: Boolean(item.isPackage),
+  packageName: item.packageName || '',
+  packageQty: Number(item.packageQty || 1),
+  lineDiscount: Number(item.lineDiscount || 0),
+  lineDiscountType: item.lineDiscountType || 'fixed',
+  stock: Number(item.stock || 0),
+}));
 
 // ── مزامنة المخزون مع تطبيق الموبايل ──────────
 async function syncStockToMobile(productId, newStock) {
@@ -218,75 +253,17 @@ const PCard = memo(function PCard({ p, packageMap, onAdd, onInfo, priceMode }) {
 
 // ── لوحة السلة (فاتورة واحدة) ─────────────────
 const CartPanel = memo(function CartPanel({ tabId, products, productMap, packageMap, customers, customerMap, user, currency, exchangeRate, onClose, priceMode, initialDraft, onDraftApplied, onUpdateInvoice }) {
-  const [cart,      setCart]       = useState([]);
-  const [customer,  setCustomer]   = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [customerAddress, setCustomerAddress] = useState('');
-  const [discount,  setDiscount]   = useState(0);
-  const [discountType, setDiscountType] = useState('percent');
-  const [received,  setReceived]   = useState('');
-  const [allowNeg,  setAllowNeg]   = useState(false);
+  const [cart,      setCart]       = useState(() => createDraftCart(initialDraft));
+  const [customer,  setCustomer]   = useState(() => initialDraft?.customer || '');
+  const [customerPhone, setCustomerPhone] = useState(() => initialDraft?.customerPhone || '');
+  const [customerAddress, setCustomerAddress] = useState(() => initialDraft?.customerAddress || '');
+  const [discount,  setDiscount]   = useState(() => Number(initialDraft?.discount || 0));
+  const [discountType, setDiscountType] = useState(() => initialDraft?.discountType || 'percent');
+  const [received,  setReceived]   = useState(() => initialDraft?.received || '');
+  const [allowNeg,  setAllowNeg]   = useState(() => Boolean(initialDraft?.allowNeg));
   const [saving,    setSaving]     = useState(false);
   const [done,      setDone]       = useState(null);
-  const [editSession, setEditSession] = useState(null);
-
-  useEffect(()=>{
-    const handler=(e)=>{
-      if(e.detail.tabId!==tabId)return;
-      addItem(e.detail.product, e.detail.sellType);
-    };
-    window.addEventListener('cartAdd',handler);
-    return()=>window.removeEventListener('cartAdd',handler);
-  },[tabId,currency,exchangeRate,allowNeg,priceMode]);
-
-  useEffect(() => {
-    if (!initialDraft) return;
-    try {
-      setCart((initialDraft.items || []).map((item) => ({
-        key: item.key || `${item.id}_${item.sellType || (item.isPackage ? 'package' : 'unit')}`,
-        id: item.id,
-        name: item.name,
-        img: item.img || '',
-        imgUrl: item.imgUrl || '',
-        qty: Number(item.qty || 1),
-        price: Number(item.price || 0),
-        priceIQD: Number(item.priceIQD || 0),
-        sellType: item.sellType || (item.isPackage ? 'package' : 'unit'),
-        isPackage: Boolean(item.isPackage),
-        packageName: item.packageName || '',
-        packageQty: Number(item.packageQty || 1),
-        lineDiscount: Number(item.lineDiscount || 0),
-        lineDiscountType: item.lineDiscountType || 'fixed',
-        stock: Number(item.stock || 0),
-      })));
-      setCustomer(initialDraft.customer || '');
-      setCustomerPhone(initialDraft.customerPhone || '');
-      setCustomerAddress(initialDraft.customerAddress || '');
-      setDiscount(Number(initialDraft.discount || 0));
-      setDiscountType(initialDraft.discountType || 'percent');
-      setReceived(initialDraft.received || '');
-      setAllowNeg(Boolean(initialDraft.allowNeg));
-      setEditSession(initialDraft.mode === 'edit' && initialDraft.invoiceId
-        ? {
-            mode: 'edit',
-            invoiceId: initialDraft.invoiceId,
-            invoiceNo: initialDraft.invoiceNo || '',
-            createdAt: initialDraft.createdAt || '',
-            dateISO: initialDraft.dateISO || '',
-            date: initialDraft.date || '',
-            originalQtyByProduct: (initialDraft.items || []).reduce((acc, item) => {
-              if (!item?.id) return acc;
-              const qtyUnits = Number(item.qty || 0) * (item.isPackage ? Number(item.packageQty || 1) : 1);
-              acc[item.id] = Number(acc[item.id] || 0) + qtyUnits;
-              return acc;
-            }, {}),
-          }
-        : null);
-      onDraftApplied?.(tabId);
-    } catch (error) {
-      console.error('[adwaa-sales] Unable to hydrate draft invoice', error);
-    }
-  }, [initialDraft, onDraftApplied, tabId]);
+  const [editSession, setEditSession] = useState(() => createEditSession(initialDraft));
 
   const resetPanel = () => {
     setDone(null);
@@ -301,7 +278,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, productMap, package
     setEditSession(null);
   };
 
-  const addItem=(p,sellType)=>{
+  const addItem=useCallback((p,sellType)=>{
     const pkg = packageMap[p.packageTypeId] || null;
     const pkgMeta = resolvePackageMeta(p, pkg);
     const supportsPackage = Boolean(pkgMeta);
@@ -323,7 +300,21 @@ const CartPanel = memo(function CartPanel({ tabId, products, productMap, package
       if(!allowNeg&&(p.stock||0)<=0)return c;
       return[...c,{key,id:p.id,name:p.name,img:p.img,imgUrl:p.imgUrl,qty:1,price,priceIQD,sellType:normalizedSellType,isPackage,packageName:isPackage?packageName:'',packageQty:isPackage?packageQty:1,lineDiscount:0,lineDiscountType:'fixed',stock:p.stock}];
     });
-  };
+  }, [allowNeg, currency, exchangeRate, packageMap, priceMode]);
+
+  useEffect(()=>{
+    const handler=(e)=>{
+      if(e.detail.tabId!==tabId)return;
+      addItem(e.detail.product, e.detail.sellType);
+    };
+    window.addEventListener('cartAdd',handler);
+    return()=>window.removeEventListener('cartAdd',handler);
+  },[addItem, tabId]);
+
+  useEffect(() => {
+    if (!initialDraft) return;
+    onDraftApplied?.(tabId);
+  }, [initialDraft, onDraftApplied, tabId]);
 
   const uQty=(key,d)=>setCart(c=>c.map(i=>{
     if(i.key!==key)return i;
@@ -355,18 +346,6 @@ const CartPanel = memo(function CartPanel({ tabId, products, productMap, package
   const previousDebtIQD=Number(selCust?.debt||0);
   const remainingAmountIQD=currency==='USD'?remainingAmount*exchangeRate:remainingAmount;
   const totalAccountIQD=previousDebtIQD+remainingAmountIQD;
-
-  useEffect(()=>{
-    if(!customer.trim()){
-      setCustomerPhone('');
-      setCustomerAddress('');
-      return;
-    }
-    if(selCust){
-      setCustomerPhone(selCust.phone || '');
-      setCustomerAddress(selCust.address || '');
-    }
-  },[customer, selCust?.id]);
 
   const save=async()=>{
     if(!cart.length)return alert('السلة فارغة');
@@ -640,7 +619,18 @@ const CartPanel = memo(function CartPanel({ tabId, products, productMap, package
     <div style={{flex:'1 1 340px',width:'min(100%, 360px)',maxWidth:'100%',background:UI.panel,display:'flex',flexDirection:'column',borderRight:`1px solid ${UI.border}`,overflow:'hidden',minWidth:0}}>
       {/* الزبون */}
       <div style={{padding:'8px 10px',borderBottom:`1px solid ${UI.border}`}}>
-        <input value={customer} onChange={e=>setCustomer(e.target.value)} list={`cl-${tabId}`} placeholder="الزبون (مطلوب عند وجود متبقي)"
+        <input value={customer} onChange={e=>{
+          const nextCustomer = e.target.value;
+          const matchedCustomer = customerMap[nextCustomer.trim()] || null;
+          setCustomer(nextCustomer);
+          if (!nextCustomer.trim()) {
+            setCustomerPhone('');
+            setCustomerAddress('');
+          } else if (matchedCustomer) {
+            setCustomerPhone(matchedCustomer.phone || '');
+            setCustomerAddress(matchedCustomer.address || '');
+          }
+        }} list={`cl-${tabId}`} placeholder="الزبون (مطلوب عند وجود متبقي)"
           style={{width:'100%',background:UI.soft,border:`1px solid ${payMethod==='آجل'&&!customer.trim()?UI.danger:UI.border}`,borderRadius:8,padding:'6px 10px',color:UI.text,fontSize:12,outline:'none',fontFamily:"'Cairo'",boxSizing:'border-box',marginBottom:4}}/>
         <datalist id={`cl-${tabId}`}>{customers.map(c=><option key={c.id} value={c.name}/>)}</datalist>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:4}}>
@@ -971,10 +961,10 @@ export default function SalesList({ user }) {
     if(activeTab===id)setActiveTab(newTabs[Math.max(0,idx-1)].id);
   };
 
-  const handleAdd=(p,sellType)=>{
+  const handleAdd=useCallback((p,sellType)=>{
     window.dispatchEvent(new CustomEvent('cartAdd',{detail:{tabId:activeTab,product:p,sellType}}));
     setSearch('');
-  };
+  }, [activeTab]);
 
   const handleSearchEnter = (event) => {
     if (event.key !== 'Enter') return;
@@ -1075,7 +1065,7 @@ export default function SalesList({ user }) {
     <PCard key={p.id} p={p} packageMap={packageMap} priceMode={priceMode}
       onAdd={handleAdd}
       onInfo={(e, product, pkg) => setPopup({product, pkg, pos:{x:Math.min(e.clientX,window.innerWidth-295),y:Math.min(e.clientY,window.innerHeight-390)}})}/>
-  )), [filtered, packageMap, priceMode, activeTab]);
+  )), [filtered, packageMap, priceMode, handleAdd]);
 
   // قائمة المبيعات
   if(view==='list') return(
@@ -1202,7 +1192,7 @@ export default function SalesList({ user }) {
         {/* فاتورة كل تبويب */}
         {tabs.map(tab=>(
             <div key={tab.id} style={{display:activeTab===tab.id?'flex':'none',flex:'1 1 340px',maxWidth:'100%'}}>
-              <CartPanel tabId={tab.id} products={products} productMap={productMap} packageMap={packageMap}
+              <CartPanel key={`${tab.id}:${draftsByTab[tab.id]?.invoiceId || draftsByTab[tab.id]?.createdAt || 'blank'}`} tabId={tab.id} products={products} productMap={productMap} packageMap={packageMap}
                 customers={customers} customerMap={customerMap} user={user} currency={currency} exchangeRate={rate} priceMode={priceMode}
                 initialDraft={draftsByTab[tab.id] || null}
                 onDraftApplied={clearDraftForTab}

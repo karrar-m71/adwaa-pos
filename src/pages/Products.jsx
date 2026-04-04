@@ -1,40 +1,23 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildSalePricesFromBuyPrice, readPricingSettings } from '../utils/pricing';
 import { attachOfflineImageTarget, getOfflineImagePreview, isOfflineImageRef, queueOfflineImage } from '../utils/offlineImageQueue';
 import { prepareProductImage } from '../utils/productImageProcessing';
 import { canUser } from '../utils/permissions';
+import { uploadToImgBB } from '../utils/imgbb';
 
 const fmt = n => (n||0).toLocaleString('ar-IQ') + ' د.ع';
 const CATS = ['إلكترونيات','إضاءة','كابلات','قواطع','مفاتيح','أسلاك','أدوات','أخرى'];
 const EMOJIS = ['📦','💡','🔌','⚡','🔧','🔲','📏','🟡','🔒','🔬'];
 const MOBILE_SYNC_BATCH_SIZE = 8;
-const readImgBBKey = () => {
-  try {
-    const settings = JSON.parse(localStorage.getItem('adwaa_settings') || '{}');
-    return settings.productImageImgbbKey || import.meta.env.VITE_IMGBB_KEY || '';
-  } catch {
-    return import.meta.env.VITE_IMGBB_KEY || '';
-  }
+const EMPTY_PRODUCT = {
+  name:'', barcode:'', cat:'إضاءة', img:'📦', imgUrl:'',
+  buyPrice:'', sellPrice:'', wholesalePrice:'', specialPrice:'',
+  stock:'', minStock:'5', desc:'',
+  hasPackage:false, packageTypeId:'',
+  packageQty:'', packagePrice:'', packageBarcode:'',
 };
-async function uploadToImgBB(file) {
-  const imgbbKey = readImgBBKey();
-  if (!imgbbKey) throw new Error('مفتاح ImgBB غير مضبوط في الإعدادات أو البيئة');
-  const form = new FormData();
-  form.append('image', file);
-  form.append('key', imgbbKey);
-
-  const response = await fetch('https://api.imgbb.com/1/upload', {
-    method: 'POST',
-    body: form,
-  });
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(data?.error?.message || 'فشل رفع صورة المادة');
-  }
-  return data.data.url;
-}
 const resolveImageUrl = (value = '') => (isOfflineImageRef(value) ? getOfflineImagePreview(value) : value);
 
 // ── مزامنة مادة مع تطبيق الموبايل ────────────
@@ -84,14 +67,11 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   const [pricingSettings, setPricingSettings] = useState(() => readPricingSettings());
   const deferredSearch = useDeferredValue(search);
 
-  const empty = {
-    name:'', barcode:'', cat:'إضاءة', img:'📦', imgUrl:'',
-    buyPrice:'', sellPrice:'', wholesalePrice:'', specialPrice:'',
-    stock:'', minStock:'5', desc:'',
-    hasPackage:false, packageTypeId:'',
-    packageQty:'', packagePrice:'', packageBarcode:'',
-  };
-  const [form, setForm] = useState(empty);
+  const [form, setForm] = useState(EMPTY_PRODUCT);
+  const resetForm = useCallback(() => ({
+    ...EMPTY_PRODUCT,
+    name: initialSearch || '',
+  }), [initialSearch]);
 
   const showSyncMessage = (message, duration = 3000) => {
     setSyncMsg(message);
@@ -120,12 +100,12 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   useEffect(() => {
     if (!openCreateOnMount) return;
     setForm((current) => ({
-      ...empty,
+      ...resetForm(),
       name: initialSearch || current.name || '',
     }));
     setEditing(null);
     setShowForm(true);
-  }, [openCreateOnMount, initialSearch]);
+  }, [openCreateOnMount, initialSearch, resetForm]);
 
   useEffect(()=>{
     const u1=onSnapshot(collection(db,'pos_products'), s=>setProducts(s.docs.map(d=>({...d.data(),id:d.id}))));
@@ -219,7 +199,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
       }
 
       showSyncMessage('✅ تم حفظ المادة محليًا');
-      setForm(empty); setEditing(null); setShowForm(false);
+      setForm(resetForm()); setEditing(null); setShowForm(false);
       onProductSaved?.(savedProduct);
       syncProductInBackground(savedProduct.id, data, '✅ تم حفظ المادة ومزامنة الموبايل');
     } catch (e) {
@@ -258,7 +238,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
         return;
       }
       setSyncMsg('⏳ جاري رفع صورة المادة...');
-      const imgUrl = await uploadToImgBB(effectiveFile);
+      const imgUrl = await uploadToImgBB(effectiveFile, 'فشل رفع صورة المادة');
       setForm((current) => ({ ...current, imgUrl }));
       setSyncMsg(prepared.fromCache
         ? '✅ تم رفع صورة المادة باستخدام نسخة معالجة محفوظة'
@@ -282,7 +262,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     }
   };
 
-  const del = async (id, name) => {
+  const del = useCallback(async (id, name) => {
     if (!canDelete) return alert('ليس لديك صلاحية لحذف المواد');
     if (!confirm(`هل أنت متأكد من حذف المادة "${name}"؟\nلا يمكن التراجع عن هذه العملية.`)) return;
     try {
@@ -292,9 +272,9 @@ export default function Products({ user, embedded = false, initialSearch = '', o
       console.error('[Products.del]', e);
       alert('خطأ في حذف المادة: ' + (e?.message || 'حدث خطأ'));
     }
-  };
+  }, [canDelete]);
 
-  const edit = (p) => {
+  const edit = useCallback((p) => {
     if (!canEdit) {
       alert('صلاحية تعديل المواد متاحة للمدير والمحاسب فقط');
       return;
@@ -313,7 +293,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
       imgUrl:         p.imgUrl||'',
     });
     setEditing(p.id); setShowForm(true);
-  };
+  }, [canEdit]);
 
   // نسخ كل pos_products إلى products مرة واحدة
   const syncAll = async () => {
@@ -383,7 +363,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
         </div>
       </div>
     );
-  }), [filtered, packagesById, canDelete]);
+  }), [filtered, packagesById, canDelete, del, edit]);
 
   const autoPackagePrice = form.packageQty && form.sellPrice
     ? Number(form.sellPrice) * Number(form.packageQty) : null;
@@ -414,7 +394,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
               alert('صلاحية إضافة المواد متاحة للمدير والمحاسب فقط');
               return;
             }
-            setForm(empty);setEditing(null);setShowForm(true);
+            setForm(resetForm());setEditing(null);setShowForm(true);
           }}
             style={{background:'#F5C800',color:'#000',border:'none',borderRadius:12,padding:'10px 20px',fontWeight:800,cursor:'pointer',fontSize:14}}>
             + إضافة مادة
@@ -640,7 +620,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
           </div>
 
           <div style={{display:'flex',gap:10,marginTop:20}}>
-            <button onClick={()=>{setShowForm(false);setForm(empty);setEditing(null);}}
+            <button onClick={()=>{setShowForm(false);setForm(resetForm());setEditing(null);}}
               style={{flex:1,background:'#fff',border:'1px solid #D9E2F2',borderRadius:12,padding:12,color:'#64748B',cursor:'pointer'}}>إلغاء</button>
             <button onClick={save} disabled={saving || uploadingImage}
               style={{flex:2,background:saving?'#E2E8F0':'linear-gradient(135deg,#F5C800,#d4a800)',color:saving?'#64748B':'#000',border:'none',borderRadius:12,padding:12,fontWeight:800,cursor:saving?'not-allowed':'pointer',opacity:saving?0.6:1}}>

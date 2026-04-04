@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { attachOfflineImageTarget, getOfflineImagePreview, isOfflineImageRef, queueOfflineImage } from '../utils/offlineImageQueue';
+import { uploadToImgBB } from '../utils/imgbb';
 
 const fmt = (value) => (value || 0).toLocaleString('ar-IQ');
 
@@ -22,7 +23,6 @@ const emptyTechnician = {
 
 const MAX_FIRESTORE_DOC_BYTES = 900 * 1024;
 const MAX_WORK_IMAGES = 6;
-const IMGBB_KEY = '2cad24f273d54000b93b713da18f6315';
 const IRAQ_PROVINCES = [
   'بغداد',
   'البصرة',
@@ -48,21 +48,6 @@ function estimatePayloadBytes(payload) {
   return new Blob([JSON.stringify(payload)]).size;
 }
 
-async function uploadToImgBB(file) {
-  const form = new FormData();
-  form.append('image', file);
-  form.append('key', IMGBB_KEY);
-
-  const response = await fetch('https://api.imgbb.com/1/upload', {
-    method: 'POST',
-    body: form,
-  });
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(data?.error?.message || 'فشل رفع الصورة');
-  }
-  return data.data.url;
-}
 const resolveImageUrl = (value = '') => (isOfflineImageRef(value) ? getOfflineImagePreview(value) : value);
 
 function TextInput({ value, onChange, placeholder, type = 'text' }) {
@@ -149,7 +134,7 @@ export default function Technicians({ user }) {
         setFlash({ ok: true, message: '📦 تم حفظ الصورة محليًا وستُرفع تلقائيًا عند توفر الإنترنت.' });
         return;
       }
-      const imageUrl = await uploadToImgBB(file);
+      const imageUrl = await uploadToImgBB(file, 'فشل رفع الصورة');
       setForm((current) => ({ ...current, imageUrl }));
       setFlash({ ok: true, message: 'تم رفع صورة الفني.' });
     } catch (error) {
@@ -181,7 +166,7 @@ export default function Technicians({ user }) {
       setFlash({ ok: true, message: 'جارٍ رفع صور الأعمال...' });
       const images = !navigator.onLine
         ? await Promise.all(files.slice(0, MAX_WORK_IMAGES).map((file) => queueOfflineImage(file)))
-        : await Promise.all(files.slice(0, MAX_WORK_IMAGES).map((file) => uploadToImgBB(file)));
+        : await Promise.all(files.slice(0, MAX_WORK_IMAGES).map((file) => uploadToImgBB(file, 'فشل رفع الصورة')));
       setForm((current) => {
         const nextImages = [...getWorkImages(current.workImages), ...images].slice(0, MAX_WORK_IMAGES);
         return { ...current, workImages: nextImages };

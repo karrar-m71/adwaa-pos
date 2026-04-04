@@ -114,8 +114,9 @@ function createWindow() {
         detail: 'يمكن حفظ نسخة من قاعدة البيانات قبل إغلاق البرنامج.',
       });
       if (result.response === 0) {
-        const dateStamp = new Date().toISOString().split('T')[0];
-        const backupName = `backup-${dateStamp}.db`;
+        const now = new Date();
+        const pad = (value) => String(value).padStart(2, '0');
+        const backupName = `backup-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}.db`;
         const preferredDir = app.getPath('documents') || app.getPath('desktop');
         const outputPath = path.join(preferredDir, backupName);
         getDb().pragma('wal_checkpoint(TRUNCATE)');

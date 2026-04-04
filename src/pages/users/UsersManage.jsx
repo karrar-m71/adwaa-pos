@@ -63,7 +63,7 @@ export default function UsersManage({ user }) {
   const builtinWithConfig = useMemo(() => BUILTIN.map(b => {
     const cfg = loadBuiltinConfig(b.username);
     return { ...b, name: cfg.name || b.name, extraAccess: cfg.extraAccess || [] };
-  }), [users]);
+  }), []);
 
   const allUsers = useMemo(() =>
     [...builtinWithConfig, ...users].filter(u =>

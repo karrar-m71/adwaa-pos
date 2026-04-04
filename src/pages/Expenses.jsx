@@ -4,14 +4,14 @@ import { db } from '../firebase';
 import { fmtIQD, todayAR, todayISO, toNum, getErrorMessage } from '../utils/helpers';
 
 const CATS = ['إيجار', 'رواتب', 'كهرباء', 'ماء', 'نقل', 'صيانة', 'مشتريات', 'خسائر', 'أخرى'];
+const EMPTY_FORM = { desc: '', amountRaw: '', cat: 'أخرى', dateISO: todayISO() };
 
 export default function Expenses({ user }) {
   const [expenses, setExpenses] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving]     = useState(false);
   const [filter, setFilter]     = useState('الكل');
-  const emptyForm = { desc: '', amountRaw: '', cat: 'أخرى', dateISO: todayISO() };
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(EMPTY_FORM);
 
   useEffect(() => {
     const u = onSnapshot(collection(db, 'pos_expenses'), s =>
@@ -60,7 +60,7 @@ export default function Expenses({ user }) {
         addedBy:   user.name,
         createdAt: new Date().toISOString(),
       });
-      setForm(emptyForm);
+      setForm(EMPTY_FORM);
       setShowForm(false);
     } catch (e) {
       alert(getErrorMessage(e, 'فشل حفظ المصروف'));
@@ -85,7 +85,7 @@ export default function Expenses({ user }) {
           <div style={{ color: '#fff', fontSize: 22, fontWeight: 800 }}>المصروفات</div>
           <div style={{ color: '#64748b', fontSize: 13 }}>{expenses.length} مصروف مسجل</div>
         </div>
-        <button onClick={() => { setForm(emptyForm); setShowForm(true); }}
+        <button onClick={() => { setForm(EMPTY_FORM); setShowForm(true); }}
           style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, padding: '10px 20px', fontWeight: 800, cursor: 'pointer', fontFamily: "'Cairo'", fontSize: 14 }}>
           + إضافة مصروف
         </button>
@@ -153,7 +153,7 @@ export default function Expenses({ user }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-            <button onClick={() => { setShowForm(false); setForm(emptyForm); }}
+            <button onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}
               style={{ flex: 1, background: '#f8fbff', border: '1px solid #cdd8ec', borderRadius: 12, padding: 12, color: '#64748b', cursor: 'pointer', fontFamily: "'Cairo'" }}>إلغاء</button>
             <button onClick={save} disabled={saving}
               style={{ flex: 2, background: saving ? '#f1f5f9' : '#ef4444', color: saving ? '#94a3b8' : '#fff', border: 'none', borderRadius: 12, padding: 12, fontWeight: 800, cursor: saving ? 'not-allowed' : 'pointer', fontFamily: "'Cairo'" }}>

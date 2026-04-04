@@ -34,7 +34,6 @@ const DEFAULT = {
   productImageAutoRemoveBg: false,
   productImageBgProvider: 'remove_bg',
   productImageBgApiKey: '',
-  productImageImgbbKey: '',
   language: 'ar',
   dateFormat: 'ar-IQ',
   autoBackup: true,
@@ -97,7 +96,11 @@ function ImageUploadRow({ label, sub, preview, onRemove, onUpload }) {
 
 export default function AppSettings({ user }) {
   const [settings, setSettings] = useState(() => {
-    try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem('adwaa_settings') || '{}') }; }
+    try {
+      const parsed = JSON.parse(localStorage.getItem('adwaa_settings') || '{}');
+      if (parsed && typeof parsed === 'object') delete parsed.productImageImgbbKey;
+      return { ...DEFAULT, ...parsed };
+    }
     catch { return DEFAULT; }
   });
   const [saved,          setSaved]          = useState(false);
@@ -109,7 +112,9 @@ export default function AppSettings({ user }) {
 
   const setField = (k, v) => setSettings(s => ({ ...s, [k]: v }));
   const save  = () => {
-    localStorage.setItem('adwaa_settings', JSON.stringify(settings));
+    const nextSettings = { ...settings };
+    delete nextSettings.productImageImgbbKey;
+    localStorage.setItem('adwaa_settings', JSON.stringify(nextSettings));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -338,17 +343,8 @@ export default function AppSettings({ user }) {
             style={{ ...inp, width:280 }}
           />
         </Row>
-        <Row label="API Key لرفع الصور إلى ImgBB" sub="اختياري هنا داخل الإعدادات بدل ملف البيئة">
-          <input
-            type="password"
-            value={settings.productImageImgbbKey || ''}
-            onChange={e => setField('productImageImgbbKey', e.target.value)}
-            placeholder="ImgBB API key"
-            style={{ ...inp, width:280 }}
-          />
-        </Row>
         <div style={{ color:'#64748b', fontSize:11, marginTop:8, lineHeight:1.9 }}>
-          إذا فشلت إزالة الخلفية أو لم يوجد مفتاح API، سيستمر النظام باستخدام الصورة الأصلية بعد ضغطها بدون إيقاف الرفع.
+          رفع صور ImgBB يعتمد فقط على `VITE_IMGBB_KEY` من ملف البيئة. إذا فشلت إزالة الخلفية أو لم يوجد مفتاح API، سيستمر النظام باستخدام الصورة الأصلية بعد ضغطها بدون إيقاف الرفع.
         </div>
       </Section>
 

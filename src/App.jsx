@@ -440,6 +440,7 @@ function AppInner() {
   // ── فتح تبويب (أو التركيز على تبويب موجود) ──
   const openPage = (page) => {
     if (!canAccessPage(user, page)) return;
+    if (user?.mustChangePassword && page !== 'change_password') return;
     const existing = tabs.find(t => t.page === page);
     if (existing) { setActiveTabId(existing.id); return; }
     const id = nextTabId.current++;
@@ -449,6 +450,8 @@ function AppInner() {
 
   const closeTab = (id) => {
     if (tabs.length === 1) return;
+    const targetTab = tabs.find((tab) => tab.id === id);
+    if (user?.mustChangePassword && targetTab?.page === 'change_password') return;
     const idx = tabs.findIndex(t => t.id === id);
     const newTabs = tabs.filter(t => t.id !== id);
     setTabs(newTabs);
@@ -456,6 +459,14 @@ function AppInner() {
   };
 
   const allowedNav  = NAV.filter(n => hasSectionAccess(user, n.id));
+  const hasForcedPasswordTab = tabs.some((tab) => tab.page === 'change_password');
+  const effectiveTabs = user?.mustChangePassword && !hasForcedPasswordTab
+    ? [{ id: 1, page: 'change_password' }]
+    : tabs;
+  const changePasswordTabId = effectiveTabs.find((tab) => tab.page === 'change_password')?.id || 1;
+  const effectiveActiveTabId = user?.mustChangePassword
+    ? changePasswordTabId
+    : (effectiveTabs.some((tab) => tab.id === activeTabId) ? activeTabId : effectiveTabs[0]?.id);
 
   const T = theme;
   const logo = localStorage.getItem('adwaa_logo');
@@ -590,7 +601,7 @@ function AppInner() {
         {/* ── شريط التبويبات العلوي ── */}
         <div style={{ background:T.sidebar, borderBottom:`1px solid ${T.border}`, flexShrink:0 }} className={isDesktopApp ? 'desktop-drag-region' : ''}>
           <div style={{ display:'flex', alignItems:'stretch', overflowX:'auto', padding:'5px 8px 0', gap:2, minHeight:38 }} className="desktop-no-drag">
-            {tabs.map(tab => {
+            {effectiveTabs.map(tab => {
               const lbl      = getPageLabel(tab.page);
               const isActive = tab.id === activeTabId;
               return (
@@ -610,7 +621,7 @@ function AppInner() {
                   <span style={{ color: isActive ? T.accent : T.textMuted, fontSize:10, fontWeight:isActive?700:400, whiteSpace:'nowrap', maxWidth:90, overflow:'hidden', textOverflow:'ellipsis' }}>
                     {lbl.label}
                   </span>
-                  {tabs.length > 1 && (
+                  {effectiveTabs.length > 1 && (
                     <span className="tab-close"
                       onClick={e => { e.stopPropagation(); closeTab(tab.id); }}
                       style={{ color:T.textMuted, fontSize:9, cursor:'pointer', opacity:0, marginRight:1, lineHeight:1, padding:'1px 2px', borderRadius:3, transition:'opacity .15s' }}>
@@ -645,11 +656,11 @@ function AppInner() {
 
         {/* ── صفحات التبويبات ── */}
         <div style={{ flex:1, position:'relative', background:T.bg, minWidth:0 }}>
-          {tabs.map(tab => {
+          {effectiveTabs.map(tab => {
             const TabPage = PAGE_MAP[tab.page];
             const lbl     = getPageLabel(tab.page);
             return (
-              <div key={tab.id} style={{ position:'absolute', inset:0, overflow:'auto', display: tab.id === activeTabId ? 'block' : 'none' }}>
+              <div key={tab.id} style={{ position:'absolute', inset:0, overflow:'auto', display: tab.id === effectiveActiveTabId ? 'block' : 'none' }}>
                 {!canAccessPage(user, tab.page)
                   ? <UnauthorizedPage label={lbl.label} theme={T}/>
                   : TabPage

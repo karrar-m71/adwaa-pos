@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
@@ -17,10 +17,9 @@ import {
   saveBridgeOffer,
   saveBridgeTechnician,
 } from '../../utils/mobileBridge';
+import { uploadToImgBB } from '../../utils/imgbb';
 
 const fmt = (value) => (value || 0).toLocaleString('ar-IQ');
-const IMGBB_KEY = '2cad24f273d54000b93b713da18f6315';
-
 const emptyGift = {
   id: '',
   name: '',
@@ -80,22 +79,6 @@ function TextInput({ value, onChange, placeholder, type = 'text' }) {
   );
 }
 
-async function uploadToImgBB(file) {
-  const form = new FormData();
-  form.append('image', file);
-  form.append('key', IMGBB_KEY);
-
-  const response = await fetch('https://api.imgbb.com/1/upload', {
-    method: 'POST',
-    body: form,
-  });
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(data?.error?.message || 'فشل رفع الصورة');
-  }
-  return data.data.url;
-}
-
 export default function MobileBridge({ user }) {
   const [sourceCount, setSourceCount] = useState(0);
   const [bridgeProductCount, setBridgeProductCount] = useState(0);
@@ -113,7 +96,7 @@ export default function MobileBridge({ user }) {
   const [offerForm, setOfferForm] = useState(emptyOffer);
   const [technicianForm, setTechnicianForm] = useState(emptyTechnician);
 
-  const bridgeConfig = useMemo(() => getBridgeConfig(), [configVersion]);
+  const bridgeConfig = getBridgeConfig();
   const gifts = bridgeConfig.gifts || [];
   const offers = bridgeConfig.offers || [];
   const technicians = bridgeConfig.technicians || [];
@@ -187,7 +170,7 @@ export default function MobileBridge({ user }) {
     setUploadingGiftImage(true);
     setFlash({ ok: true, message: 'جارٍ رفع صورة الهدية...' });
     try {
-      const imageUrl = await uploadToImgBB(file);
+      const imageUrl = await uploadToImgBB(file, 'فشل رفع الصورة');
       setGiftForm((current) => ({ ...current, imageUrl }));
       setFlash({ ok: true, message: 'تم رفع صورة الهدية.' });
     } catch (error) {

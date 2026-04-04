@@ -7,6 +7,9 @@ import {
 } from '../utils/helpers';
 import { canUser } from '../utils/permissions';
 
+const EMPTY_SUPPLIER = { name: '', phone: '', address: '', notes: '' };
+const EMPTY_PURCHASE = { paymentMethod: 'نقدي', currency: 'IQD', notes: '' };
+
 export default function Suppliers({ user }) {
   const canCreate = canUser(user, 'suppliers_create');
   const canEdit = canUser(user, 'suppliers_edit');
@@ -22,11 +25,9 @@ export default function Suppliers({ user }) {
   const [search, setSearch]           = useState('');
   const [saving, setSaving]           = useState(false);
 
-  const emptyS = { name: '', phone: '', address: '', notes: '' };
-  const [form, setForm] = useState(emptyS);
+  const [form, setForm] = useState(EMPTY_SUPPLIER);
 
-  const emptyP = { paymentMethod: 'نقدي', currency: 'IQD', notes: '' };
-  const [purchForm, setPurchForm] = useState(emptyP);
+  const [purchForm, setPurchForm] = useState(EMPTY_PURCHASE);
   const [cartItems, setCartItems] = useState([]);
 
   // دفع الدين
@@ -38,7 +39,7 @@ export default function Suppliers({ user }) {
       alert('ليس لديك صلاحية لإضافة مورد جديد');
       return;
     }
-    setForm(emptyS);
+    setForm(EMPTY_SUPPLIER);
     setEditing(null);
     setShowForm(true);
   }, [canCreate]);
@@ -102,7 +103,7 @@ export default function Suppliers({ user }) {
           createdAt: new Date().toISOString(),
         });
       }
-      setForm(emptyS); setEditing(null); setShowForm(false);
+      setForm(EMPTY_SUPPLIER); setEditing(null); setShowForm(false);
     } catch (e) {
       alert(getErrorMessage(e, 'فشل حفظ بيانات المورد'));
     } finally {
@@ -219,7 +220,7 @@ export default function Suppliers({ user }) {
       }
 
       setCartItems([]);
-      setPurchForm(emptyP);
+      setPurchForm(EMPTY_PURCHASE);
       setSelSupplier(null);
       setShowPurchase(false);
       alert('✅ تم تسجيل فاتورة الشراء وتحديث المخزون');
@@ -279,7 +280,7 @@ export default function Suppliers({ user }) {
   if (showPurchase) return (
     <div style={{ padding: 24, fontFamily: "'Cairo'", direction: 'rtl' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-        <button onClick={() => { setShowPurchase(false); setCartItems([]); setPurchForm(emptyP); setSelSupplier(null); }}
+        <button onClick={() => { setShowPurchase(false); setCartItems([]); setPurchForm(EMPTY_PURCHASE); setSelSupplier(null); }}
           style={{ background: '#ffffff', border: '1px solid #cdd8ec', borderRadius: 10, padding: '8px 16px', color: '#F5C800', cursor: 'pointer', fontFamily: "'Cairo'" }}>← رجوع</button>
         <div style={{ color: '#fff', fontSize: 20, fontWeight: 800 }}>فاتورة شراء جديدة</div>
       </div>
@@ -485,7 +486,7 @@ export default function Suppliers({ user }) {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-            <button onClick={() => { setShowForm(false); setForm(emptyS); setEditing(null); }}
+            <button onClick={() => { setShowForm(false); setForm(EMPTY_SUPPLIER); setEditing(null); }}
               style={{ flex: 1, background: '#f8fbff', border: '1px solid #cdd8ec', borderRadius: 12, padding: 12, color: '#64748b', cursor: 'pointer', fontFamily: "'Cairo'" }}>إلغاء</button>
             <button onClick={saveSupplier} disabled={saving}
               style={{ flex: 2, background: 'linear-gradient(135deg,#F5C800,#d4a800)', color: '#000', border: 'none', borderRadius: 12, padding: 12, fontWeight: 800, cursor: 'pointer', fontFamily: "'Cairo'" }}>

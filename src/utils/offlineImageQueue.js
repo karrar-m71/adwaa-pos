@@ -138,7 +138,6 @@ export async function processOfflineImageQueue(imgbbKey) {
       try {
         const uploadedUrl = item.uploadedUrl || await uploadDataUrlToImgBB(item.dataUrl, imgbbKey);
         for (const target of item.targets) {
-          // eslint-disable-next-line no-await-in-loop
           await patchTarget(target, uploadedUrl);
         }
         done += 1;

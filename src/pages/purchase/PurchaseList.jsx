@@ -112,10 +112,6 @@ function InlineAmountInput({ value, placeholder, max, onChangeValue }) {
   const [localValue, setLocalValue] = useState(value ?? '');
   const [isEditing, setIsEditing] = useState(false);
 
-  useEffect(() => {
-    if (!isEditing) setLocalValue(value ?? '');
-  }, [value, isEditing]);
-
   const commitValue = () => {
     const raw = String(localValue ?? '');
     if (!raw.trim()) {
@@ -1437,6 +1433,7 @@ export default function PurchaseList({user}){
                   <div style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:8,padding:10,textAlign:'center'}}>
                     <div style={{color:'#2563eb',fontSize:10,marginBottom:3}}>المبلغ الواصل</div>
                     <InlineAmountInput
+                      key={String(cart.paidAmountInput ?? cart.paidAmount ?? '')}
                       value={cart.paidAmountInput ?? cart.paidAmount ?? ''}
                       max={total}
                       placeholder={fmtByCurrency(total, cart.currency || 'IQD', exchangeRate)}

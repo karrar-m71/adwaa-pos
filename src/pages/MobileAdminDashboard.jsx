@@ -9,6 +9,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { uploadToImgBB } from '../utils/imgbb';
 
 const SUPPORT = '07714424355';
 const S = {
@@ -25,19 +26,8 @@ const S = {
   subtle: '#94A3B8',
 };
 const TIER_MAP = { برونزي: '#CD7F32', فضي: '#A8A8A8', ذهبي: '#D4AF37', بلاتيني: '#E5E4E2' };
-const IMGBB_KEY = '2cad24f273d54000b93b713da18f6315';
 const fmt = (n) => (n || 0).toLocaleString('ar-IQ') + ' د.ع';
 const nowStr = () => new Date().toLocaleDateString('ar-IQ', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-async function uploadToImgBB(file) {
-  const form = new FormData();
-  form.append('image', file);
-  form.append('key', IMGBB_KEY);
-  const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
-  const data = await res.json();
-  if (!data.success) throw new Error('فشل رفع الصورة');
-  return data.data.url;
-}
 
 function ImageUploader({ value, onChange, label = 'صورة' }) {
   const inputRef = useRef();
@@ -94,7 +84,9 @@ function MultiImageUploader({ values = [], onChange, label = 'صور الأعم�
     try {
       const urls = await Promise.all(files.map((f) => uploadToImgBB(f)));
       onChange([...values, ...urls]);
-    } catch {}
+    } catch (error) {
+      console.error('[MobileAdminDashboard.MultiImageUploader]', error);
+    }
     setUp(false);
     e.target.value = '';
   };

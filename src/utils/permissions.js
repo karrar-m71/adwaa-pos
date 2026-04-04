@@ -81,7 +81,6 @@ const PAGE_TO_SECTION = {
   del_lists: 'audit',
   del_items: 'audit',
   users_manage: 'users_menu',
-  change_password: 'users_menu',
   task_manager: 'users_menu',
   completed_tasks: 'users_menu',
   printer_settings: 'tools',
@@ -122,6 +121,7 @@ export function getSectionForPage(page) {
 }
 
 export function canAccessPage(user, page) {
+  if (page === 'change_password') return Boolean(user);
   const sectionId = getSectionForPage(page);
   if (!sectionId) return true;
   return hasSectionAccess(user, sectionId);
@@ -132,4 +132,3 @@ export function canUser(user, actionKey) {
   const roles = ACTION_RULES[actionKey] || [];
   return roles.includes(user.role);
 }
-
