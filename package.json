@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "desktop:build": "node scripts/verify-win-build-host.mjs && npm run build && electron-builder --win nsis",
+    "desktop:build": "node scripts/verify-win-build-host.mjs && npm run build && electron-builder --win nsis --publish never",
     "desktop:release": "node scripts/verify-win-build-host.mjs && npm run build && electron-builder --win nsis --publish always",
     "desktop:mac": "npm run build && electron-builder --mac dmg",
     "lint": "eslint .",
