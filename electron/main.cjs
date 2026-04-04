@@ -7,6 +7,10 @@ const { registerBackupHandlers } = require('./db/ipc/backup-handlers.cjs');
 const { runSyncCycle, startSyncScheduler, stopSyncScheduler } = require('./db/sync/sync-manager.cjs');
 
 const isDev = !!process.env.ELECTRON_START_URL;
+const logSyncError = (message, error) => {
+  const details = error?.stack || error?.message || error || 'unknown_error';
+  console.error(`[adwaa-sync] ${message}\n${details}`);
+};
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -44,7 +48,9 @@ app.whenReady().then(() => {
   registerDbHandlers();
   registerSyncHandlers();
   registerBackupHandlers();
-  runSyncCycle().catch(() => null);
+  runSyncCycle().catch((error) => {
+    logSyncError('Initial desktop sync failed during app startup.', error);
+  });
   startSyncScheduler(10000);
   createWindow();
   app.on('activate', () => {

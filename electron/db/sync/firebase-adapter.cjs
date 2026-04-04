@@ -1,58 +1,50 @@
-const fs = require('fs');
-const path = require('path');
-
 let cached = null;
 
-function parseEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) return {};
-  const text = fs.readFileSync(filePath, 'utf8');
-  const lines = text.split(/\r?\n/);
-  const out = {};
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx < 0) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const value = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
-    if (key) out[key] = value;
-  }
-  return out;
+const FIREBASE_CONFIG = Object.freeze({
+  apiKey: 'AIzaSyAZdIbmvj7HD1SNp7ALr9gsV0sOf7MgNMo',
+  authDomain: 'adwaa-app-e7aaf.firebaseapp.com',
+  projectId: 'adwaa-app-e7aaf',
+  storageBucket: 'adwaa-app-e7aaf.firebasestorage.app',
+  messagingSenderId: '288505641994',
+  appId: '1:288505641994:web:59e6eaf78300cfc05bb3f3',
+});
+
+function logSyncError(message, error) {
+  const details = error?.stack || error?.message || error || 'unknown_error';
+  console.error(`[adwaa-sync] ${message}\n${details}`);
 }
 
 function readFirebaseConfig() {
-  const root = path.join(__dirname, '..', '..', '..');
-  const envLocal = parseEnvFile(path.join(root, '.env.local'));
-  const env = { ...envLocal, ...process.env };
-  const config = {
-    apiKey: env.VITE_FIREBASE_API_KEY,
-    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: env.VITE_FIREBASE_APP_ID,
-  };
-  const complete = Object.values(config).every(Boolean);
-  return complete ? config : null;
+  const missingKeys = Object.entries(FIREBASE_CONFIG)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+
+  if (missingKeys.length) {
+    throw new Error(`Desktop Firebase config is incomplete: ${missingKeys.join(', ')}`);
+  }
+
+  return FIREBASE_CONFIG;
 }
 
 async function getFirestoreClient() {
   if (cached) return cached;
-  const config = readFirebaseConfig();
-  if (!config) return null;
+  try {
+    const config = readFirebaseConfig();
+    const firebaseApp = await import('firebase/app');
+    const firestore = await import('firebase/firestore');
 
-  const firebaseApp = await import('firebase/app');
-  const firestore = await import('firebase/firestore');
-
-  const app = firebaseApp.initializeApp(config, 'offline-sync-main');
-  const db = firestore.getFirestore(app);
-  cached = { db, firestore };
-  return cached;
+    const app = firebaseApp.initializeApp(config, 'offline-sync-main');
+    const db = firestore.getFirestore(app);
+    cached = { db, firestore };
+    return cached;
+  } catch (error) {
+    logSyncError('Failed to initialize desktop Firebase client.', error);
+    throw error;
+  }
 }
 
 async function upsertToFirebase(collectionName, row, payload) {
   const client = await getFirestoreClient();
-  if (!client) throw new Error('Firebase config missing for sync');
   const { db, firestore } = client;
   const id = row.firebase_id || row.local_id;
   await firestore.setDoc(firestore.doc(db, collectionName, id), payload, { merge: true });
@@ -61,7 +53,6 @@ async function upsertToFirebase(collectionName, row, payload) {
 
 async function softDeleteInFirebase(collectionName, row) {
   const client = await getFirestoreClient();
-  if (!client) throw new Error('Firebase config missing for sync');
   const { db, firestore } = client;
   const id = row.firebase_id || row.local_id;
   await firestore.setDoc(firestore.doc(db, collectionName, id), {
@@ -73,7 +64,6 @@ async function softDeleteInFirebase(collectionName, row) {
 
 async function upsertDocPath(docPath, payload) {
   const client = await getFirestoreClient();
-  if (!client) throw new Error('Firebase config missing for sync');
   const { db, firestore } = client;
   await firestore.setDoc(firestore.doc(db, docPath), payload, { merge: true });
   return true;
@@ -81,7 +71,6 @@ async function upsertDocPath(docPath, payload) {
 
 async function softDeleteDocPath(docPath) {
   const client = await getFirestoreClient();
-  if (!client) throw new Error('Firebase config missing for sync');
   const { db, firestore } = client;
   await firestore.setDoc(firestore.doc(db, docPath), {
     is_deleted: true,
@@ -92,7 +81,6 @@ async function softDeleteDocPath(docPath) {
 
 async function listCollectionDocs(collectionName) {
   const client = await getFirestoreClient();
-  if (!client) throw new Error('Firebase config missing for sync');
   const { db, firestore } = client;
   const snap = await firestore.getDocs(firestore.collection(db, collectionName));
   return snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));

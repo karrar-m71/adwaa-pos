@@ -43,8 +43,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "package.json",
-      ".env.local"
+      "package.json"
     ],
     "asar": true,
     "asarUnpack": [

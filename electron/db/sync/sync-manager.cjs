@@ -7,6 +7,10 @@ const BASE_RETRY_MS = 4000;
 const PULL_COOLDOWN_MS = 60000;
 const MAX_SYNCED_QUEUE_ROWS = 3000;
 const nowIso = () => new Date().toISOString();
+const logSyncError = (message, error) => {
+  const details = error?.stack || error?.message || error || 'unknown_error';
+  console.error(`[adwaa-sync] ${message}\n${details}`);
+};
 const toNum = (value) => {
   const n = Number(value || 0);
   return Number.isFinite(n) ? n : 0;
@@ -278,13 +282,14 @@ async function pullMobileProductsToPos() {
           }
           imported += 1;
           importedInCollection += 1;
-        } catch {
-          // ignore broken document, continue
+        } catch (error) {
+          logSyncError(`Skipping broken document while importing ${collectionName}/${item?.id || 'unknown'}.`, error);
         }
       }
       details.push({ collection: collectionName, scanned: docs.length, imported: importedInCollection });
-    } catch {
-      details.push({ collection: collectionName, scanned: 0, imported: 0, error: true });
+    } catch (error) {
+      logSyncError(`Failed to pull Firebase collection "${collectionName}".`, error);
+      details.push({ collection: collectionName, scanned: 0, imported: 0, error: true, message: error?.message || 'pull_failed' });
     }
   }
 
@@ -419,8 +424,9 @@ async function runSyncCycle() {
     try {
       pullResult = await pullMobileProductsToPos();
       _lastPullAt = nowMs;
-    } catch {
-      // pull is best-effort; queue push remains independent
+    } catch (error) {
+      logSyncError('Desktop Firebase pull failed during sync cycle.', error);
+      pullResult = { imported: 0, scanned: 0, skipped: false, error: error?.message || 'pull_failed' };
     }
   }
   const pruned = pruneSyncedQueue();
@@ -449,6 +455,8 @@ function startSyncScheduler(intervalMs = 10000) {
     _running = true;
     try {
       _lastResult = await runSyncCycle();
+    } catch (error) {
+      logSyncError('Unhandled error in sync scheduler.', error);
     } finally {
       _running = false;
     }
