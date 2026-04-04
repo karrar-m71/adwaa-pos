@@ -40,3 +40,12 @@ jobs:
         run: npm run desktop:release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Windows installer
+        if: startsWith(github.ref, 'refs/heads/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: Adwaa-POS-Setup
+          path: |
+            release/*.exe
+            release/**/*.exe
+            release/*.blockmap
