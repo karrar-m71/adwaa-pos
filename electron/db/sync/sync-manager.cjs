@@ -237,6 +237,35 @@ function upsertCloudDocToLocal(collectionName, docId, data = {}) {
   });
 }
 
+function pruneMirroredMobileUsersFromPosLocal() {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT doc_path, data_json
+    FROM documents
+    WHERE collection_name = 'pos_users'
+      AND is_deleted = 0
+  `).all();
+
+  let removed = 0;
+  for (const row of rows) {
+    try {
+      const payload = row.data_json ? JSON.parse(row.data_json) : {};
+      const hasDesktopIdentity = Boolean(String(payload.username || '').trim()) && Boolean(String(payload.role || '').trim());
+      if (hasDesktopIdentity) continue;
+
+      db.prepare(`
+        DELETE FROM documents
+        WHERE doc_path = ?
+      `).run(row.doc_path);
+      removed += 1;
+    } catch (error) {
+      logSyncError(`Failed to inspect desktop user record ${row.doc_path} during cleanup.`, error);
+    }
+  }
+
+  return removed;
+}
+
 async function pullMobileProductsToPos() {
   const pullCollections = [
     // Mobile collections
@@ -274,9 +303,6 @@ async function pullMobileProductsToPos() {
       for (const item of docs) {
         try {
           upsertCloudDocToLocal(collectionName, item.id, item.data || {});
-          if (collectionName === 'users') {
-            upsertCloudDocToLocal('pos_users', item.id, item.data || {});
-          }
           if (collectionName === 'products') {
             upsertPosProductFromMobileLocal(item.id, item.data || {});
           }
@@ -291,6 +317,11 @@ async function pullMobileProductsToPos() {
       logSyncError(`Failed to pull Firebase collection "${collectionName}".`, error);
       details.push({ collection: collectionName, scanned: 0, imported: 0, error: true, message: error?.message || 'pull_failed' });
     }
+  }
+
+  const prunedDesktopUsers = pruneMirroredMobileUsersFromPosLocal();
+  if (prunedDesktopUsers > 0) {
+    details.push({ collection: 'pos_users', scanned: prunedDesktopUsers, imported: 0, cleaned: prunedDesktopUsers });
   }
 
   return { imported, scanned, details };
