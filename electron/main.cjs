@@ -21,7 +21,7 @@ function resolveWindowIcon() {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'icon.ico');
   }
-  return path.join(__dirname, '..', 'build', 'icon.ico');
+  return path.join(__dirname, 'assets', 'icon.ico');
 }
 
 function setupAutoUpdater() {

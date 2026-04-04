@@ -41,12 +41,10 @@
   "build": {
     "appId": "com.adwaa.pos",
     "productName": "Adwaa POS",
-    "icon": "build/icon.png",
+    "icon": "electron/assets/icon.png",
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "build/icon.ico",
-      "build/icon.png",
       "package.json"
     ],
     "asar": true,
@@ -59,11 +57,11 @@
     },
     "extraResources": [
       {
-        "from": "build/icon.ico",
+        "from": "electron/assets/icon.ico",
         "to": "icon.ico"
       },
       {
-        "from": "build/icon.png",
+        "from": "electron/assets/icon.png",
         "to": "icon.png"
       }
     ],
@@ -76,13 +74,13 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico",
+      "icon": "electron/assets/icon.ico",
       "artifactName": "Adwaa-POS-Setup-${version}.${ext}"
     },
     "nsis": {
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
+      "installerIcon": "electron/assets/icon.ico",
+      "uninstallerIcon": "electron/assets/icon.ico",
+      "installerHeaderIcon": "electron/assets/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
@@ -90,7 +88,7 @@
       "target": "dmg",
       "artifactName": "Adwaa-POS-${version}.${ext}",
       "category": "public.app-category.business",
-      "icon": "build/icon.png"
+      "icon": "electron/assets/icon.png"
     }
   }
 }
