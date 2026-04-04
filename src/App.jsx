@@ -1,93 +1,94 @@
-import { useEffect, useState, useRef } from 'react';
+import { lazy, Suspense, useEffect, useState, useRef } from 'react';
 import { waitForPendingWrites } from 'firebase/firestore';
 import { ThemeProvider, useTheme } from './ThemeContext';
 import { db } from './firebase';
 import { startOfflineImageQueueWorker } from './utils/offlineImageQueue';
 import { canAccessPage, hasSectionAccess } from './utils/permissions';
 import Login     from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import POS       from './pages/POS';
-import Products  from './pages/Products';
-import Reports   from './pages/Reports';
-import Expenses  from './pages/Expenses';
-import Customers from './pages/Customers';
-import Suppliers from './pages/Suppliers';
-import Technicians from './pages/Technicians';
-import Inventory from './pages/Inventory';
-import Vouchers  from './pages/Vouchers';
-import MobileAdminDashboard from './pages/MobileAdminDashboard';
 
-import Warehouses     from './pages/warehouse/Warehouses';
-import Packages       from './pages/warehouse/Packages';
-import BarcodeManager from './pages/warehouse/BarcodeManager';
-import BarcodePrint   from './pages/warehouse/BarcodePrint';
-import StockIn        from './pages/warehouse/StockIn';
-import StockOut       from './pages/warehouse/StockOut';
-import StockSettle    from './pages/warehouse/StockSettle';
-import StockTransfer  from './pages/warehouse/StockTransfer';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const POS = lazy(() => import('./pages/POS'));
+const Products = lazy(() => import('./pages/Products'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Expenses = lazy(() => import('./pages/Expenses'));
+const Customers = lazy(() => import('./pages/Customers'));
+const Suppliers = lazy(() => import('./pages/Suppliers'));
+const Technicians = lazy(() => import('./pages/Technicians'));
+const Inventory = lazy(() => import('./pages/Inventory'));
+const Vouchers = lazy(() => import('./pages/Vouchers'));
+const MobileAdminDashboard = lazy(() => import('./pages/MobileAdminDashboard'));
 
-import SalesList    from './pages/sales/SalesList';
-import SalesReturn  from './pages/sales/SalesReturn';
-import PriceQuote   from './pages/sales/PriceQuote';
+const Warehouses = lazy(() => import('./pages/warehouse/Warehouses'));
+const Packages = lazy(() => import('./pages/warehouse/Packages'));
+const BarcodeManager = lazy(() => import('./pages/warehouse/BarcodeManager'));
+const BarcodePrint = lazy(() => import('./pages/warehouse/BarcodePrint'));
+const StockIn = lazy(() => import('./pages/warehouse/StockIn'));
+const StockOut = lazy(() => import('./pages/warehouse/StockOut'));
+const StockSettle = lazy(() => import('./pages/warehouse/StockSettle'));
+const StockTransfer = lazy(() => import('./pages/warehouse/StockTransfer'));
 
-import PurchaseList   from './pages/purchase/PurchaseList';
-import PurchaseReturn from './pages/purchase/PurchaseReturn';
+const SalesList = lazy(() => import('./pages/sales/SalesList'));
+const SalesReturn = lazy(() => import('./pages/sales/SalesReturn'));
+const PriceQuote = lazy(() => import('./pages/sales/PriceQuote'));
 
-import AccountStatement from './pages/acc_reports/AccountStatement';
-import AccountBalances  from './pages/acc_reports/AccountBalances';
-import VoucherReport    from './pages/acc_reports/VoucherReport';
-import VoucherSummary   from './pages/acc_reports/VoucherSummary';
-import TradingReport    from './pages/acc_reports/TradingReport';
-import BalanceSummary   from './pages/acc_reports/BalanceSummary';
-import CashStatement    from './pages/acc_reports/CashStatement';
-import CustomerDebts    from './pages/acc_reports/CustomerDebts';
-import SupplierDebts    from './pages/acc_reports/SupplierDebts';
-import DailyMovement    from './pages/acc_reports/DailyMovement';
+const PurchaseList = lazy(() => import('./pages/purchase/PurchaseList'));
+const PurchaseReturn = lazy(() => import('./pages/purchase/PurchaseReturn'));
 
-import ProfitExpenses    from './pages/profit_reports/ProfitExpenses';
-import ProfitReport      from './pages/profit_reports/ProfitReport';
-import ProfitSummary     from './pages/profit_reports/ProfitSummary';
-import ListProfits       from './pages/profit_reports/ListProfits';
-import ListDiscounts     from './pages/profit_reports/ListDiscounts';
-import LossSales         from './pages/profit_reports/LossSales';
-import CustomerProfits   from './pages/profit_reports/CustomerProfits';
-import CustomerItemProfit from './pages/profit_reports/CustomerItemProfit';
-import ItemProfits       from './pages/profit_reports/ItemProfits';
-import ItemCustomerProfit from './pages/profit_reports/ItemCustomerProfit';
-import WarehouseProfits  from './pages/profit_reports/WarehouseProfits';
-import GroupProfits      from './pages/profit_reports/GroupProfits';
+const AccountStatement = lazy(() => import('./pages/acc_reports/AccountStatement'));
+const AccountBalances = lazy(() => import('./pages/acc_reports/AccountBalances'));
+const VoucherReport = lazy(() => import('./pages/acc_reports/VoucherReport'));
+const VoucherSummary = lazy(() => import('./pages/acc_reports/VoucherSummary'));
+const TradingReport = lazy(() => import('./pages/acc_reports/TradingReport'));
+const BalanceSummary = lazy(() => import('./pages/acc_reports/BalanceSummary'));
+const CashStatement = lazy(() => import('./pages/acc_reports/CashStatement'));
+const CustomerDebts = lazy(() => import('./pages/acc_reports/CustomerDebts'));
+const SupplierDebts = lazy(() => import('./pages/acc_reports/SupplierDebts'));
+const DailyMovement = lazy(() => import('./pages/acc_reports/DailyMovement'));
 
-import ItemsDisplay   from './pages/item_reports/ItemsDisplay';
-import ItemMovement   from './pages/item_reports/ItemMovement';
-import TopSelling     from './pages/item_reports/TopSelling';
-import LeastSelling   from './pages/item_reports/LeastSelling';
-import SellBelowCost  from './pages/item_reports/SellBelowCost';
-import SlowMoving     from './pages/item_reports/SlowMoving';
-import MinStockItems  from './pages/item_reports/MinStockItems';
-import MaxStockItems  from './pages/item_reports/MaxStockItems';
-import StockShortage  from './pages/item_reports/StockShortage';
-import SalesIndicator from './pages/item_reports/SalesIndicator';
+const ProfitExpenses = lazy(() => import('./pages/profit_reports/ProfitExpenses'));
+const ProfitReport = lazy(() => import('./pages/profit_reports/ProfitReport'));
+const ProfitSummary = lazy(() => import('./pages/profit_reports/ProfitSummary'));
+const ListProfits = lazy(() => import('./pages/profit_reports/ListProfits'));
+const ListDiscounts = lazy(() => import('./pages/profit_reports/ListDiscounts'));
+const LossSales = lazy(() => import('./pages/profit_reports/LossSales'));
+const CustomerProfits = lazy(() => import('./pages/profit_reports/CustomerProfits'));
+const CustomerItemProfit = lazy(() => import('./pages/profit_reports/CustomerItemProfit'));
+const ItemProfits = lazy(() => import('./pages/profit_reports/ItemProfits'));
+const ItemCustomerProfit = lazy(() => import('./pages/profit_reports/ItemCustomerProfit'));
+const WarehouseProfits = lazy(() => import('./pages/profit_reports/WarehouseProfits'));
+const GroupProfits = lazy(() => import('./pages/profit_reports/GroupProfits'));
 
-import AdjustedBalances from './pages/audit/AdjustedBalances';
-import AdjustedItems    from './pages/audit/AdjustedItems';
-import AdjustedLists    from './pages/audit/AdjustedLists';
-import DeletedAccounts  from './pages/audit/DeletedAccounts';
-import DeletedVouchers  from './pages/audit/DeletedVouchers';
-import DeletedLists     from './pages/audit/DeletedLists';
-import DeletedItems     from './pages/audit/DeletedItems';
+const ItemsDisplay = lazy(() => import('./pages/item_reports/ItemsDisplay'));
+const ItemMovement = lazy(() => import('./pages/item_reports/ItemMovement'));
+const TopSelling = lazy(() => import('./pages/item_reports/TopSelling'));
+const LeastSelling = lazy(() => import('./pages/item_reports/LeastSelling'));
+const SellBelowCost = lazy(() => import('./pages/item_reports/SellBelowCost'));
+const SlowMoving = lazy(() => import('./pages/item_reports/SlowMoving'));
+const MinStockItems = lazy(() => import('./pages/item_reports/MinStockItems'));
+const MaxStockItems = lazy(() => import('./pages/item_reports/MaxStockItems'));
+const StockShortage = lazy(() => import('./pages/item_reports/StockShortage'));
+const SalesIndicator = lazy(() => import('./pages/item_reports/SalesIndicator'));
 
-import UsersManage    from './pages/users/UsersManage';
-import ChangePassword from './pages/users/ChangePassword';
-import TaskManager    from './pages/users/TaskManager';
-import CompletedTasks from './pages/users/CompletedTasks';
+const AdjustedBalances = lazy(() => import('./pages/audit/AdjustedBalances'));
+const AdjustedItems = lazy(() => import('./pages/audit/AdjustedItems'));
+const AdjustedLists = lazy(() => import('./pages/audit/AdjustedLists'));
+const DeletedAccounts = lazy(() => import('./pages/audit/DeletedAccounts'));
+const DeletedVouchers = lazy(() => import('./pages/audit/DeletedVouchers'));
+const DeletedLists = lazy(() => import('./pages/audit/DeletedLists'));
+const DeletedItems = lazy(() => import('./pages/audit/DeletedItems'));
 
-import PrinterSettings  from './pages/tools/PrinterSettings';
-import AppSettings      from './pages/tools/AppSettings';
-import ReportSettings   from './pages/tools/ReportSettings';
-import Backup           from './pages/tools/Backup';
-import Shortcuts        from './pages/tools/Shortcuts';
-import VoucherShortcuts from './pages/tools/VoucherShortcuts';
-import AIAssistant      from './pages/ai/AIAssistant';
+const UsersManage = lazy(() => import('./pages/users/UsersManage'));
+const ChangePassword = lazy(() => import('./pages/users/ChangePassword'));
+const TaskManager = lazy(() => import('./pages/users/TaskManager'));
+const CompletedTasks = lazy(() => import('./pages/users/CompletedTasks'));
+
+const PrinterSettings = lazy(() => import('./pages/tools/PrinterSettings'));
+const AppSettings = lazy(() => import('./pages/tools/AppSettings'));
+const ReportSettings = lazy(() => import('./pages/tools/ReportSettings'));
+const Backup = lazy(() => import('./pages/tools/Backup'));
+const Shortcuts = lazy(() => import('./pages/tools/Shortcuts'));
+const VoucherShortcuts = lazy(() => import('./pages/tools/VoucherShortcuts'));
+const AIAssistant = lazy(() => import('./pages/ai/AIAssistant'));
 
 const PAGE_MAP = {
   dashboard:Dashboard, pos:POS, products:Products, customers:Customers,
@@ -474,6 +475,7 @@ function AppInner() {
         ::-webkit-scrollbar-thumb{background:${T.border};border-radius:4px}
         input,select,textarea,button{font-family:'Cairo',sans-serif!important}
         @keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
         .nav-item:hover{background:${T.accent}10!important}
         .nav-child:hover{background:${T.accent}15!important}
         .tab-btn:hover .tab-close{opacity:1!important}
@@ -651,7 +653,11 @@ function AppInner() {
                 {!canAccessPage(user, tab.page)
                   ? <UnauthorizedPage label={lbl.label} theme={T}/>
                   : TabPage
-                  ? <TabPage user={user}/>
+                  ? (
+                    <Suspense fallback={<PageLoading label={lbl.label} theme={T}/>}>
+                      <TabPage user={user}/>
+                    </Suspense>
+                  )
                   : <ComingSoon label={lbl.label} icon={lbl.icon} theme={T}/>
                 }
               </div>
@@ -699,6 +705,16 @@ function UnauthorizedPage({ label, theme: T }) {
       <div style={{ fontSize:56, marginBottom:16 }}>🔒</div>
       <div style={{ color:T.accent, fontSize:22, fontWeight:800, marginBottom:8 }}>{label}</div>
       <div style={{ color:T.textMuted, fontSize:14 }}>ليس لديك صلاحية للوصول إلى هذه الصفحة</div>
+    </div>
+  );
+}
+
+function PageLoading({ label, theme: T }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', fontFamily:"'Cairo'" }}>
+      <div style={{ width:46, height:46, borderRadius:'50%', border:`4px solid ${T.border}`, borderTopColor:T.accent, animation:'spin .8s linear infinite', marginBottom:14 }} />
+      <div style={{ color:T.accent, fontSize:18, fontWeight:800, marginBottom:6 }}>{label}</div>
+      <div style={{ color:T.textMuted, fontSize:13 }}>جارٍ تحميل الصفحة...</div>
     </div>
   );
 }

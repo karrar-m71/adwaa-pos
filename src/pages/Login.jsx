@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
+import { db } from '../firebase';
 import { createPasswordHash, verifyPasswordInput } from '../utils/auth';
 
 // كلمات المرور الافتراضية — تُقرأ من localStorage إن وُجدت
@@ -56,8 +58,6 @@ async function readBuiltinPasswordRecord(username) {
 
 async function verifyFirestoreUser(username, password) {
   try {
-    const { collection, getDocs, query, where, updateDoc, doc } = await import('firebase/firestore');
-    const { db } = await import('../firebase');
     const q = query(collection(db, 'pos_users'), where('username', '==', username));
     const snap = await getDocs(q);
     if (snap.empty) return null;

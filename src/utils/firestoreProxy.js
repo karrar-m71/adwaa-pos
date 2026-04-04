@@ -77,7 +77,7 @@ if (typeof window !== 'undefined') {
   });
   setInterval(() => {
     if (navigator.onLine) flushLocalQueue().catch(() => null);
-  }, 15000);
+  }, 600000);
 }
 
 export function collection(db, ...segments) {

@@ -231,6 +231,49 @@ function generateInvoiceNo(prefix = 'INV') {
   return `${prefix}-${String(seq).padStart(6, '0')}`;
 }
 
+function getCustomerRefTx(db, customerId, name) {
+  const normalizedId = String(customerId || '').trim();
+  if (normalizedId) {
+    const row = getByDocPathTx(db, `pos_customers/${normalizedId}`);
+    if (row) {
+      return {
+        id: row.doc_id,
+        path: row.doc_path,
+        data: row.data_json ? JSON.parse(row.data_json) : {},
+      };
+    }
+  }
+  if (name && name !== 'زبون عام') return findCustomerByNameTx(db, name);
+  return null;
+}
+
+function applyCustomerLedgerTx(db, ref, { totalDelta = 0, dueDelta = 0, currencyCode = 'IQD', nextName = '', nextPhone = '', nextAddress = '' } = {}) {
+  if (!ref) return null;
+  const current = ref.data || {};
+  const totalsByCurrency = readTotalPurchasesByCurrency(current);
+  const debtByCurrency = readDebtByCurrency(current);
+  if (currencyCode === 'USD') {
+    totalsByCurrency.USD = Math.max(0, Number(totalsByCurrency.USD || 0) + Number(totalDelta || 0));
+    debtByCurrency.USD = Math.max(0, Number(debtByCurrency.USD || 0) + Number(dueDelta || 0));
+  } else {
+    totalsByCurrency.IQD = Math.max(0, Number(totalsByCurrency.IQD || 0) + Number(totalDelta || 0));
+    debtByCurrency.IQD = Math.max(0, Number(debtByCurrency.IQD || 0) + Number(dueDelta || 0));
+  }
+  ref.data = {
+    ...current,
+    name: nextName || current.name || '',
+    phone: nextPhone || current.phone || '',
+    address: nextAddress || current.address || '',
+    debt: Number(debtByCurrency.IQD || 0),
+    debtByCurrency,
+    totalPurchases: Math.max(0, Number(totalsByCurrency.IQD || 0)),
+    totalPurchasesByCurrency: totalsByCurrency,
+    updatedAt: nowIso(),
+  };
+  upsertDocTx(db, ref.path, ref.data, false);
+  return ref.data;
+}
+
 function createSaleWithAccountingTx(input = {}) {
   const db = getDb();
   const tx = db.transaction((payload) => {
@@ -529,24 +572,9 @@ function updateSaleWithAccountingTx(input = {}) {
       }, false);
     }
 
-    const getCustomerRef = (customerId, name) => {
-      if (customerId) {
-        const row = getByDocPathTx(db, `pos_customers/${customerId}`);
-        if (row) {
-          return {
-            id: row.doc_id,
-            path: row.doc_path,
-            data: row.data_json ? JSON.parse(row.data_json) : {},
-          };
-        }
-      }
-      if (name && name !== 'زبون عام') return findCustomerByNameTx(db, name);
-      return null;
-    };
-
     const oldCustomerName = String(oldSale.customer || '').trim();
-    const oldCustomerRef = getCustomerRef(oldSale.customerId, oldCustomerName);
-    let newCustomerRef = getCustomerRef(payload.customerId, customerName);
+    const oldCustomerRef = getCustomerRefTx(db, oldSale.customerId, oldCustomerName);
+    let newCustomerRef = getCustomerRefTx(db, payload.customerId, customerName);
 
     if (!newCustomerRef && customerName && customerName !== 'زبون عام') {
       const newCustomerId = randomUUID().replace(/-/g, '').slice(0, 20);
@@ -574,32 +602,6 @@ function updateSaleWithAccountingTx(input = {}) {
       ? Number(oldSale.dueAmount ?? oldSale.remainingAmount ?? 0) / oldRate
       : Number(oldSale.dueAmount ?? oldSale.remainingAmount ?? 0);
 
-    const applyCustomerLedger = (ref, { totalDelta = 0, dueDelta = 0, currencyCode = 'IQD', nextName = '', nextPhone = '', nextAddress = '' } = {}) => {
-      if (!ref) return;
-      const current = ref.data || {};
-      const totalsByCurrency = readTotalPurchasesByCurrency(current);
-      const debtByCurrency = readDebtByCurrency(current);
-      if (currencyCode === 'USD') {
-        totalsByCurrency.USD = Math.max(0, Number(totalsByCurrency.USD || 0) + Number(totalDelta || 0));
-        debtByCurrency.USD = Math.max(0, Number(debtByCurrency.USD || 0) + Number(dueDelta || 0));
-      } else {
-        totalsByCurrency.IQD = Math.max(0, Number(totalsByCurrency.IQD || 0) + Number(totalDelta || 0));
-        debtByCurrency.IQD = Math.max(0, Number(debtByCurrency.IQD || 0) + Number(dueDelta || 0));
-      }
-      ref.data = {
-        ...current,
-        name: nextName || current.name || '',
-        phone: nextPhone || current.phone || '',
-        address: nextAddress || current.address || '',
-        debt: Number(debtByCurrency.IQD || 0),
-        debtByCurrency,
-        totalPurchases: Math.max(0, Number(totalsByCurrency.IQD || 0)),
-        totalPurchasesByCurrency: totalsByCurrency,
-        updatedAt: ts,
-      };
-      upsertDocTx(db, ref.path, ref.data, false);
-    };
-
     const isSameCustomer = Boolean(
       oldCustomerRef
       && newCustomerRef
@@ -607,7 +609,7 @@ function updateSaleWithAccountingTx(input = {}) {
     );
 
     if (oldCustomerRef && oldCustomerName && oldCustomerName !== 'زبون عام' && !isSameCustomer) {
-      applyCustomerLedger(oldCustomerRef, {
+      applyCustomerLedgerTx(db, oldCustomerRef, {
         totalDelta: -oldTotalDisplay,
         dueDelta: -oldDueDisplay,
         currencyCode: oldCurrency,
@@ -618,7 +620,7 @@ function updateSaleWithAccountingTx(input = {}) {
     const previousDebt = currency === 'USD' ? Number(previousDebtByCurrency.USD || 0) : Number(previousDebtByCurrency.IQD || 0);
 
     if (newCustomerRef && customerName !== 'زبون عام') {
-      applyCustomerLedger(newCustomerRef, {
+      applyCustomerLedgerTx(db, newCustomerRef, {
         totalDelta: isSameCustomer ? (currency === oldCurrency ? totalDisplay - oldTotalDisplay : totalDisplay) : totalDisplay,
         dueDelta: isSameCustomer ? (currency === oldCurrency ? remainingAmountDisplay - oldDueDisplay : remainingAmountDisplay) : remainingAmountDisplay,
         currencyCode: currency,
@@ -627,7 +629,7 @@ function updateSaleWithAccountingTx(input = {}) {
         nextAddress: customerAddress,
       });
       if (isSameCustomer && currency !== oldCurrency) {
-        applyCustomerLedger(newCustomerRef, {
+        applyCustomerLedgerTx(db, newCustomerRef, {
           totalDelta: -oldTotalDisplay,
           dueDelta: -oldDueDisplay,
           currencyCode: oldCurrency,
@@ -1285,10 +1287,80 @@ function createPurchaseReturnTx(input = {}) {
   return tx(input);
 }
 
+function deleteSaleWithAccountingTx(input = {}) {
+  const db = getDb();
+  const tx = db.transaction((payload) => {
+    const saleId = String(payload.id || payload.invoiceId || '').trim();
+    if (!saleId) throw new Error('Invoice id is required');
+    const saleRow = getByDocPathTx(db, `pos_sales/${saleId}`);
+    if (!saleRow || Number(saleRow.is_deleted || 0) === 1) throw new Error('Invoice not found');
+    const sale = saleRow.data_json ? JSON.parse(saleRow.data_json) : {};
+    const ts = nowIso();
+
+    const oldQtyMap = sumQtyByProduct(sale.items || []);
+    for (const productId of Object.keys(oldQtyMap)) {
+      const row = getByDocPathTx(db, `pos_products/${productId}`);
+      if (!row) continue;
+      const product = row.data_json ? JSON.parse(row.data_json) : {};
+      const restoredQty = Number(oldQtyMap[productId] || 0);
+      upsertDocTx(db, `pos_products/${productId}`, {
+        ...product,
+        stock: Number(product.stock || 0) + restoredQty,
+        soldCount: Math.max(0, Number(product.soldCount || 0) - restoredQty),
+        updatedAt: ts,
+      }, false);
+    }
+
+    const customerName = String(sale.customer || '').trim();
+    const customerRef = getCustomerRefTx(db, sale.customerId, customerName);
+    if (customerRef && customerName && customerName !== 'زبون عام') {
+      const saleCurrency = sale.currency === 'USD' ? 'USD' : 'IQD';
+      const saleRate = Number(sale.exchangeRate || 1) || 1;
+      const saleTotalDisplay = saleCurrency === 'USD' ? Number(sale.total || 0) / saleRate : Number(sale.total || 0);
+      const saleDueDisplay = saleCurrency === 'USD'
+        ? Number(sale.dueAmount ?? sale.remainingAmount ?? 0) / saleRate
+        : Number(sale.dueAmount ?? sale.remainingAmount ?? 0);
+      applyCustomerLedgerTx(db, customerRef, {
+        totalDelta: -saleTotalDisplay,
+        dueDelta: -saleDueDisplay,
+        currencyCode: saleCurrency,
+        nextName: customerName,
+        nextPhone: sale.customerPhone || customerRef.data?.phone || '',
+        nextAddress: sale.customerAddress || customerRef.data?.address || '',
+      });
+    }
+
+    const linkedVouchers = findDocsByCollectionTx(db, 'pos_vouchers').filter((entry) => (
+      entry.data?.linkedSaleId === saleId
+      || entry.data?.linkedSaleNo === sale.invoiceNo
+    ));
+    linkedVouchers.forEach((entry) => softDeleteDocTx(db, entry.path));
+
+    const linkedExpenses = findDocsByCollectionTx(db, 'pos_expenses').filter((entry) => (
+      entry.data?.source === 'sale_discount_auto'
+      && (
+        entry.data?.linkedSaleId === saleId
+        || entry.data?.linkedSaleNo === sale.invoiceNo
+      )
+    ));
+    linkedExpenses.forEach((entry) => softDeleteDocTx(db, entry.path));
+
+    softDeleteDocTx(db, `pos_sales/${saleId}`);
+    return {
+      id: saleId,
+      invoiceNo: sale.invoiceNo || '',
+      deleted: true,
+    };
+  });
+
+  return tx(input);
+}
+
 module.exports = {
   listByCollection,
   createSaleWithAccountingTx,
   updateSaleWithAccountingTx,
+  deleteSaleWithAccountingTx,
   createVoucherWithAccountingTx,
   createPurchaseWithAccountingTx,
   createSaleReturnTx,

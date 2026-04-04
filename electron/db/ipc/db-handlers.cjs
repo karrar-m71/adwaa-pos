@@ -12,12 +12,17 @@ const {
 const {
   createSaleWithAccountingTx,
   updateSaleWithAccountingTx,
+  deleteSaleWithAccountingTx,
   createVoucherWithAccountingTx,
   createPurchaseWithAccountingTx,
   createSaleReturnTx,
   createPurchaseReturnTx,
   generateInvoiceNo,
 } = require('../repositories/pos-usecases.repo.cjs');
+const {
+  getImageProcessingCache,
+  setImageProcessingCache,
+} = require('../repositories/image-processing-cache.repo.cjs');
 
 function registerDbHandlers() {
   ipcMain.handle('local-db:meta', async () => ({ ok: true, driver: 'sqlite' }));
@@ -35,9 +40,12 @@ function registerDbHandlers() {
   ipcMain.handle('local-store:add', async (_event, collectionPath, data) => addDocument(collectionPath, data));
   ipcMain.handle('local-store:delete', async (_event, docPath) => softDeleteDocument(docPath));
   ipcMain.handle('local-store:atomic', async (_event, ops) => runAtomicOps(ops));
+  ipcMain.handle('local-image-cache:get', async (_event, hash) => getImageProcessingCache(hash));
+  ipcMain.handle('local-image-cache:set', async (_event, hash, payload) => setImageProcessingCache(hash, payload));
 
   ipcMain.handle('local-usecase:create-sale', async (_event, payload) => createSaleWithAccountingTx(payload));
   ipcMain.handle('local-usecase:update-sale', async (_event, payload) => updateSaleWithAccountingTx(payload));
+  ipcMain.handle('local-usecase:delete-sale', async (_event, payload) => deleteSaleWithAccountingTx(payload));
   ipcMain.handle('local-usecase:create-voucher', async (_event, payload) => createVoucherWithAccountingTx(payload));
   ipcMain.handle('local-usecase:create-purchase', async (_event, payload) => createPurchaseWithAccountingTx(payload));
   ipcMain.handle('local-usecase:create-sale-return', async (_event, payload) => createSaleReturnTx(payload));

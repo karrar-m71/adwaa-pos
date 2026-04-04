@@ -3,17 +3,27 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } fro
 import { db } from '../firebase';
 import { buildSalePricesFromBuyPrice, readPricingSettings } from '../utils/pricing';
 import { attachOfflineImageTarget, getOfflineImagePreview, isOfflineImageRef, queueOfflineImage } from '../utils/offlineImageQueue';
+import { prepareProductImage } from '../utils/productImageProcessing';
 import { canUser } from '../utils/permissions';
 
 const fmt = n => (n||0).toLocaleString('ar-IQ') + ' د.ع';
 const CATS = ['إلكترونيات','إضاءة','كابلات','قواطع','مفاتيح','أسلاك','أدوات','أخرى'];
 const EMOJIS = ['📦','💡','🔌','⚡','🔧','🔲','📏','🟡','🔒','🔬'];
-const IMGBB_KEY = import.meta.env.VITE_IMGBB_KEY || '';
+const MOBILE_SYNC_BATCH_SIZE = 8;
+const readImgBBKey = () => {
+  try {
+    const settings = JSON.parse(localStorage.getItem('adwaa_settings') || '{}');
+    return settings.productImageImgbbKey || import.meta.env.VITE_IMGBB_KEY || '';
+  } catch {
+    return import.meta.env.VITE_IMGBB_KEY || '';
+  }
+};
 async function uploadToImgBB(file) {
-  if (!IMGBB_KEY) throw new Error('مفتاح ImgBB غير مضبوط في إعدادات البيئة');
+  const imgbbKey = readImgBBKey();
+  if (!imgbbKey) throw new Error('مفتاح ImgBB غير مضبوط في الإعدادات أو البيئة');
   const form = new FormData();
   form.append('image', file);
-  form.append('key', IMGBB_KEY);
+  form.append('key', imgbbKey);
 
   const response = await fetch('https://api.imgbb.com/1/upload', {
     method: 'POST',
@@ -50,8 +60,10 @@ async function syncToMobile(id, data) {
       minStock:    data.minStock    || 5,
       updatedAt:   new Date().toISOString(),
     }, { merge: true });
+    return true;
   } catch (e) {
-    console.warn('Mobile sync failed:', e.message);
+    console.warn('[adwaa-products] Mobile sync failed:', e.message);
+    return false;
   }
 }
 
@@ -80,6 +92,26 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     packageQty:'', packagePrice:'', packageBarcode:'',
   };
   const [form, setForm] = useState(empty);
+
+  const showSyncMessage = (message, duration = 3000) => {
+    setSyncMsg(message);
+    window.setTimeout(() => setSyncMsg(''), duration);
+  };
+
+  const syncProductInBackground = (id, data, successMessage = '✅ تمت مزامنة الموبايل') => {
+    if (!navigator.onLine) {
+      showSyncMessage('📦 تم الحفظ محليًا، وستتم مزامنة الموبايل عند توفر الإنترنت', 3500);
+      return;
+    }
+    window.setTimeout(async () => {
+      const ok = await syncToMobile(id, data);
+      if (ok) {
+        showSyncMessage(successMessage, 2500);
+      } else {
+        showSyncMessage('⚠️ تم الحفظ محليًا لكن مزامنة الموبايل لم تكتمل', 4000);
+      }
+    }, 0);
+  };
 
   useEffect(() => {
     setSearch(initialSearch || '');
@@ -111,7 +143,15 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     };
   }, []);
 
-  const selPackage = packages.find(p=>p.id===form.packageTypeId);
+  const packagesById = useMemo(
+    () => Object.fromEntries(packages.map((pkg) => [pkg.id, pkg])),
+    [packages],
+  );
+  const productStats = useMemo(() => ({
+    total: products.length,
+    packaged: products.filter((product) => product.hasPackage).length,
+  }), [products]);
+  const selPackage = packagesById[form.packageTypeId] || null;
   const buyPriceValue = Number(form.buyPrice || 0);
   const sellPriceValue = Number(form.sellPrice || 0);
   const wholesalePriceValue = Number(form.wholesalePrice || 0);
@@ -126,12 +166,17 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     ? (((specialPriceValue - buyPriceValue) / buyPriceValue) * 100)
     : 0;
 
-  const filtered = useMemo(() => products.filter((p) => {
+  const filtered = useMemo(() => {
+    const normalizedSearch = String(deferredSearch || '').trim().toLowerCase();
+    return products.filter((p) => {
     const matchCat = catFilter === 'الكل' || p.cat === catFilter;
     const matchPkg = pkgFilter === 'الكل' || (pkgFilter === 'معبأ' && p.hasPackage) || (pkgFilter === 'غير معبأ' && !p.hasPackage);
-    const matchSearch = !deferredSearch || p.name?.includes(deferredSearch) || p.barcode?.includes(deferredSearch);
+    const name = String(p.name || '').toLowerCase();
+    const barcode = String(p.barcode || '').toLowerCase();
+    const matchSearch = !normalizedSearch || name.includes(normalizedSearch) || barcode.includes(normalizedSearch);
     return matchCat && matchPkg && matchSearch;
-  }), [products, catFilter, pkgFilter, deferredSearch]);
+    });
+  }, [products, catFilter, pkgFilter, deferredSearch]);
 
   const save = async () => {
     if (!(editing ? canEdit : canCreate)) return alert('ليس لديك صلاحية لتعديل المواد');
@@ -161,8 +206,6 @@ export default function Products({ user, embedded = false, initialSearch = '', o
         if (isOfflineImageRef(data.imgUrl)) {
           attachOfflineImageTarget(data.imgUrl, { collection: 'pos_products', docId: editing, field: 'imgUrl' });
         }
-        // مزامنة مع الموبايل
-        await syncToMobile(editing, data);
         savedProduct = { id: editing, ...data };
       } else {
         // إضافة في الديسكتوب
@@ -172,15 +215,13 @@ export default function Products({ user, embedded = false, initialSearch = '', o
         if (isOfflineImageRef(data.imgUrl)) {
           attachOfflineImageTarget(data.imgUrl, { collection: 'pos_products', docId: ref.id, field: 'imgUrl' });
         }
-        // مزامنة مع الموبايل بنفس الـ ID
-        await syncToMobile(ref.id, data);
         savedProduct = { id: ref.id, ...data, soldCount: 0, createdAt: new Date().toISOString() };
       }
 
-      setSyncMsg('✅ تم الحفظ ومزامنة الموبايل');
-      setTimeout(()=>setSyncMsg(''), 3000);
+      showSyncMessage('✅ تم حفظ المادة محليًا');
       setForm(empty); setEditing(null); setShowForm(false);
       onProductSaved?.(savedProduct);
+      syncProductInBackground(savedProduct.id, data, '✅ تم حفظ المادة ومزامنة الموبايل');
     } catch (e) {
       console.error('[Products.save]', e);
       alert('خطأ في حفظ المادة: ' + (e?.message || 'حدث خطأ غير متوقع'));
@@ -198,22 +239,36 @@ export default function Products({ user, embedded = false, initialSearch = '', o
     }
 
     setUploadingImage(true);
-    setSyncMsg('⏳ جاري رفع صورة المادة...');
+    setSyncMsg('⏳ جاري تجهيز صورة المادة...');
+    let effectiveFile = file;
     try {
+      const prepared = await prepareProductImage(file, {
+        onStatus: (message) => setSyncMsg(message),
+      });
+      effectiveFile = prepared.file || file;
       if (!navigator.onLine) {
-        const offlineRef = await queueOfflineImage(file);
+        const offlineRef = await queueOfflineImage(effectiveFile);
         setForm((current) => ({ ...current, imgUrl: offlineRef }));
-        setSyncMsg('📦 تم حفظ الصورة محليًا وستُرفع تلقائيًا عند توفر الإنترنت');
+        setSyncMsg(prepared.fromCache
+          ? '📦 استُخدمت نسخة معالجة محفوظة، وتم حفظها محليًا حتى تتوفر الشبكة'
+          : prepared.usedBackgroundRemoval
+            ? '📦 تمت معالجة الصورة وحفظها محليًا، وستُرفع تلقائيًا عند توفر الإنترنت'
+            : '📦 تم حفظ الصورة محليًا وستُرفع تلقائيًا عند توفر الإنترنت');
         setTimeout(() => setSyncMsg(''), 3500);
         return;
       }
-      const imgUrl = await uploadToImgBB(file);
+      setSyncMsg('⏳ جاري رفع صورة المادة...');
+      const imgUrl = await uploadToImgBB(effectiveFile);
       setForm((current) => ({ ...current, imgUrl }));
-      setSyncMsg('✅ تم رفع صورة المادة');
+      setSyncMsg(prepared.fromCache
+        ? '✅ تم رفع صورة المادة باستخدام نسخة معالجة محفوظة'
+        : prepared.usedBackgroundRemoval
+          ? '✅ تم رفع صورة المادة بعد إزالة الخلفية'
+          : '✅ تم رفع صورة المادة');
       setTimeout(() => setSyncMsg(''), 3000);
     } catch (error) {
       try {
-        const offlineRef = await queueOfflineImage(file);
+        const offlineRef = await queueOfflineImage(effectiveFile);
         setForm((current) => ({ ...current, imgUrl: offlineRef }));
         setSyncMsg('📦 الرفع متعذر الآن. حُفظت محليًا وستُرفع لاحقًا تلقائيًا');
         setTimeout(() => setSyncMsg(''), 3500);
@@ -263,19 +318,30 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   // نسخ كل pos_products إلى products مرة واحدة
   const syncAll = async () => {
     if(!confirm(`مزامنة ${products.length} مادة مع تطبيق الموبايل؟`)) return;
-    setSyncMsg('⏳ جاري المزامنة...');
-    let count = 0;
-    for(const p of products){
-      await syncToMobile(p.id, p);
-      count++;
-      setSyncMsg(`⏳ ${count}/${products.length}`);
+    if (!navigator.onLine) {
+      showSyncMessage('⚠️ لا توجد شبكة. تعذر بدء مزامنة المواد مع الموبايل', 4000);
+      return;
     }
-    setSyncMsg(`✅ تمت مزامنة ${count} مادة مع الموبايل!`);
-    setTimeout(()=>setSyncMsg(''), 5000);
+    setSyncMsg('⏳ جاري المزامنة...');
+    let syncedCount = 0;
+    let failedCount = 0;
+    for (let i = 0; i < products.length; i += MOBILE_SYNC_BATCH_SIZE) {
+      const batch = products.slice(i, i + MOBILE_SYNC_BATCH_SIZE);
+      const results = await Promise.all(batch.map((product) => syncToMobile(product.id, product)));
+      syncedCount += results.filter(Boolean).length;
+      failedCount += results.filter((result) => !result).length;
+      setSyncMsg(`⏳ ${Math.min(i + batch.length, products.length)}/${products.length}`);
+    }
+    showSyncMessage(
+      failedCount
+        ? `⚠️ تمت مزامنة ${syncedCount} مادة، وفشل ${failedCount} مادة`
+        : `✅ تمت مزامنة ${syncedCount} مادة مع الموبايل!`,
+      5000,
+    );
   };
 
   const productRows = useMemo(() => filtered.map((p, i) => {
-    const pkg = packages.find((pk) => pk.id === p.packageTypeId);
+    const pkg = packagesById[p.packageTypeId] || null;
     return (
       <div key={p.id} style={{display:'grid',gridTemplateColumns:'2.5fr 1fr 1fr 1fr 1fr 1fr 1fr',padding:'12px 20px',borderBottom:i<filtered.length-1?'1px solid #F1F5F9':'none',alignItems:'center'}}>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -317,7 +383,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
         </div>
       </div>
     );
-  }), [filtered, packages, canDelete]);
+  }), [filtered, packagesById, canDelete]);
 
   const autoPackagePrice = form.packageQty && form.sellPrice
     ? Number(form.sellPrice) * Number(form.packageQty) : null;
@@ -329,7 +395,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
         <div>
           <div style={{color:'#18243A',fontSize:22,fontWeight:800}}>إدارة المواد</div>
-          <div style={{color:'#64748B',fontSize:13}}>{products.length} مادة • {products.filter(p=>p.hasPackage).length} معبّأة</div>
+          <div style={{color:'#64748B',fontSize:13}}>{productStats.total} مادة • {productStats.packaged} معبّأة</div>
         </div>
         <div style={{display:'flex',gap:10}}>
           {embedded && (

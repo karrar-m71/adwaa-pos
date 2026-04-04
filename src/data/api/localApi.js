@@ -72,6 +72,16 @@ export async function localStoreAtomic(ops = []) {
   return window.adwaaLocal.store.atomic(ops);
 }
 
+export async function localImageCacheGet(hash) {
+  if (!hasLocalApi()) return null;
+  return window.adwaaLocal.imageCache.get(hash);
+}
+
+export async function localImageCacheSet(hash, payload) {
+  if (!hasLocalApi()) throw new Error('Local API unavailable');
+  return window.adwaaLocal.imageCache.set(hash, payload);
+}
+
 export async function localCreateSale(payload) {
   if (!hasLocalApi()) throw new Error('Local API unavailable');
   return window.adwaaLocal.usecases.createSale(payload);
@@ -80,6 +90,11 @@ export async function localCreateSale(payload) {
 export async function localUpdateSale(payload) {
   if (!hasLocalApi()) throw new Error('Local API unavailable');
   return window.adwaaLocal.usecases.updateSale(payload);
+}
+
+export async function localDeleteSale(payload) {
+  if (!hasLocalApi()) throw new Error('Local API unavailable');
+  return window.adwaaLocal.usecases.deleteSale(payload);
 }
 
 export async function localCreateVoucher(payload) {

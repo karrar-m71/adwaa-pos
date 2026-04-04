@@ -5,7 +5,7 @@ import { openProfessionalInvoicePrint } from '../../utils/invoicePrint';
 import { getUnitPriceByMode, PRICE_MODES } from '../../utils/pricing';
 import { getErrorMessage, getExchangeRate, genInvoiceNo, getPreferredCurrency, setPreferredCurrency } from '../../utils/helpers';
 import { getOfflineImagePreview, isOfflineImageRef } from '../../utils/offlineImageQueue';
-import { hasLocalApi, localCreateSale, runLocalSync } from '../../data/api/localApi';
+import { hasLocalApi, localCreateSale, localDeleteSale, runLocalSync } from '../../data/api/localApi';
 import { buildInvoiceEditDraft, explainInvoiceError, getInvoiceById, printInvoice, updateInvoice as updateInvoiceService } from '../../services/invoiceService';
 
 const UI = {
@@ -104,8 +104,10 @@ async function syncStockToMobile(productId, newStock) {
       stock: newStock,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
+    return true;
   } catch (e) {
-    console.warn('Mobile stock sync failed:', e.message);
+    console.warn('[adwaa-sales] Mobile stock sync failed:', e.message);
+    return false;
   }
 }
 
@@ -164,8 +166,8 @@ function ProductPopup({ product, pkg, pos, onClose }) {
 }
 
 // ── كارت منتج ──────────────────────────────────
-const PCard = memo(function PCard({ p, packages, onAdd, onInfo, priceMode }) {
-  const pkg = packages.find(pk=>pk.id===p.packageTypeId);
+const PCard = memo(function PCard({ p, packageMap, onAdd, onInfo, priceMode }) {
+  const pkg = packageMap[p.packageTypeId] || null;
   const pkgMeta = resolvePackageMeta(p, pkg);
   const supportsPackage = Boolean(pkgMeta);
   const low = (p.stock||0) <= 0;
@@ -215,7 +217,7 @@ const PCard = memo(function PCard({ p, packages, onAdd, onInfo, priceMode }) {
 });
 
 // ── لوحة السلة (فاتورة واحدة) ─────────────────
-const CartPanel = memo(function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode, initialDraft, onDraftApplied, onUpdateInvoice }) {
+const CartPanel = memo(function CartPanel({ tabId, products, productMap, packageMap, customers, customerMap, user, currency, exchangeRate, onClose, priceMode, initialDraft, onDraftApplied, onUpdateInvoice }) {
   const [cart,      setCart]       = useState([]);
   const [customer,  setCustomer]   = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -300,7 +302,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
   };
 
   const addItem=(p,sellType)=>{
-    const pkg=packages.find(pk=>pk.id===p.packageTypeId);
+    const pkg = packageMap[p.packageTypeId] || null;
     const pkgMeta = resolvePackageMeta(p, pkg);
     const supportsPackage = Boolean(pkgMeta);
     const normalizedSellType = sellType === 'package' && supportsPackage ? 'package' : 'unit';
@@ -325,7 +327,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
 
   const uQty=(key,d)=>setCart(c=>c.map(i=>{
     if(i.key!==key)return i;
-    const p=products.find(p=>p.id===i.id);
+    const p = productMap[i.id];
     const newQty=i.qty+d;
     if(!allowNeg&&newQty<=0)return i;
     const need=newQty*(i.isPackage?i.packageQty:1);
@@ -349,7 +351,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
   const remainingAmount=Math.max(0,total-appliedAmount);
   const change=Math.max(0,receivedAmount-total);
   const payMethod=remainingAmount>0?'آجل':'نقدي';
-  const selCust=customers.find(c=>c.name===customer.trim());
+  const selCust = customerMap[customer.trim()] || null;
   const previousDebtIQD=Number(selCust?.debt||0);
   const remainingAmountIQD=currency==='USD'?remainingAmount*exchangeRate:remainingAmount;
   const totalAccountIQD=previousDebtIQD+remainingAmountIQD;
@@ -372,7 +374,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
     if(!customer.trim() && receivedAmount > total)return alert('لا يمكن أن يكون المبلغ الواصل أكبر من مبلغ الفاتورة عند البيع لزبون عام');
     if (!allowNeg) {
       const insufficientItem = cart.find((item) => {
-        const product = products.find((p) => p.id === item.id);
+        const product = productMap[item.id];
         const originalQty = Number(editSession?.originalQtyByProduct?.[item.id] || 0);
         const requestedUnits = Number(item.qty || 0) * (item.isPackage ? Number(item.packageQty || 1) : 1);
         return requestedUnits > (Number(product?.stock || 0) + originalQty);
@@ -503,9 +505,10 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
       }
       const saleRef = await addDoc(collection(db,'pos_sales'),sale);
 
-      // تحديث المخزون في الديسكتوب + الموبايل بالتوازي
+      // تحديث المخزون في الديسكتوب الآن، ومزامنة الموبايل بالخلفية حتى لا تؤخر حفظ الفاتورة.
+      const stockSyncJobs = [];
       await Promise.all(cart.map(async (item) => {
-        const p = products.find(p => p.id === item.id);
+        const p = productMap[item.id];
         if (!p) return;
         const stockUsed = item.isPackage ? item.qty * item.packageQty : item.qty;
         const newStock  = (p.stock || 0) - stockUsed;
@@ -513,7 +516,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
           stock:     newStock,
           soldCount: (p.soldCount || 0) + Math.abs(stockUsed),
         }, { merge: true });
-        await syncStockToMobile(item.id, newStock);
+        stockSyncJobs.push(syncStockToMobile(item.id, newStock));
       }));
 
       // دين الزبون
@@ -565,6 +568,13 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
         sale.linkedVoucherNo = voucherNo;
       }
       setDone(sale);
+      Promise.allSettled(stockSyncJobs).then((results) => {
+        const failures = results.filter((entry) => entry.status === 'fulfilled' && entry.value === false).length
+          + results.filter((entry) => entry.status === 'rejected').length;
+        if (failures > 0) {
+          console.warn(`[adwaa-sales] ${failures} mobile stock sync operation(s) failed after saving sale ${sale.invoiceNo}`);
+        }
+      });
     } catch (e) {
       const rawMessage = String(e?.message || '');
       if (rawMessage.toLowerCase().includes('insufficient stock')) {
@@ -583,7 +593,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
         ...inv,
         dueAmount: inv.dueAmount ?? inv.remainingAmount ?? 0,
         paidAmount: inv.paidAmount ?? Math.max(0, Number(inv.total || 0) - Number(inv.remainingAmount || 0)),
-        customerPhone: inv.customerPhone || customers.find((c)=>c.id===inv.customerId || c.name===inv.customer)?.phone || '',
+        customerPhone: inv.customerPhone || customerMap[inv.customer || '']?.phone || '',
       }, 'sale');
       if(!ok) alert('تعذر فتح نافذة الطباعة. تأكد من السماح بالنوافذ المنبثقة.');
     } catch (error) {
@@ -818,6 +828,23 @@ export default function SalesList({ user }) {
   const [rowActionState,setRowActionState] = useState({});
   const deferredSearch = useDeferredValue(search);
 
+  const packageMap = useMemo(
+    () => Object.fromEntries(packages.map((pkg) => [pkg.id, pkg])),
+    [packages],
+  );
+  const productMap = useMemo(
+    () => Object.fromEntries(products.map((product) => [product.id, product])),
+    [products],
+  );
+  const customerMap = useMemo(
+    () => customers.reduce((acc, customerItem) => {
+      const key = String(customerItem?.name || '').trim();
+      if (key) acc[key] = customerItem;
+      return acc;
+    }, {}),
+    [customers],
+  );
+
   useEffect(()=>{
     const us=[
       onSnapshot(collection(db,'pos_products'),  s=>setProducts(sortProductsStable(s.docs.map(d=>({...d.data(),id:d.id}))))),
@@ -986,9 +1013,14 @@ export default function SalesList({ user }) {
     if (!sale?.id) return;
     if (!confirm(`حذف الفاتورة ${sale.invoiceNo || ''}؟ سيتم عكس أثرها على المخزون والحسابات.`)) return;
     try {
+      if (hasLocalApi()) {
+        await localDeleteSale({ id: sale.id });
+        runLocalSync().catch(() => null);
+        return;
+      }
       const batch = writeBatch(db);
       for (const item of sale.items || []) {
-        let product = products.find((p) => p.id === item.id);
+        let product = productMap[item.id];
         if (!product) {
           const snap = await getDoc(doc(db, 'pos_products', item.id));
           if (snap.exists()) product = { id: snap.id, ...snap.data() };
@@ -1040,10 +1072,10 @@ export default function SalesList({ user }) {
   };
 
   const productCards = useMemo(() => filtered.map((p) => (
-    <PCard key={p.id} p={p} packages={packages} priceMode={priceMode}
+    <PCard key={p.id} p={p} packageMap={packageMap} priceMode={priceMode}
       onAdd={handleAdd}
       onInfo={(e, product, pkg) => setPopup({product, pkg, pos:{x:Math.min(e.clientX,window.innerWidth-295),y:Math.min(e.clientY,window.innerHeight-390)}})}/>
-  )), [filtered, packages, priceMode, activeTab]);
+  )), [filtered, packageMap, priceMode, activeTab]);
 
   // قائمة المبيعات
   if(view==='list') return(
@@ -1170,8 +1202,8 @@ export default function SalesList({ user }) {
         {/* فاتورة كل تبويب */}
         {tabs.map(tab=>(
             <div key={tab.id} style={{display:activeTab===tab.id?'flex':'none',flex:'1 1 340px',maxWidth:'100%'}}>
-              <CartPanel tabId={tab.id} products={products} packages={packages}
-                customers={customers} user={user} currency={currency} exchangeRate={rate} priceMode={priceMode}
+              <CartPanel tabId={tab.id} products={products} productMap={productMap} packageMap={packageMap}
+                customers={customers} customerMap={customerMap} user={user} currency={currency} exchangeRate={rate} priceMode={priceMode}
                 initialDraft={draftsByTab[tab.id] || null}
                 onDraftApplied={clearDraftForTab}
                 onUpdateInvoice={handleUpdateInvoice}
