@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('adwaaLocal', {
   },
   usecases: {
     createSale: (payload) => ipcRenderer.invoke('local-usecase:create-sale', payload),
+    updateSale: (payload) => ipcRenderer.invoke('local-usecase:update-sale', payload),
     createVoucher: (payload) => ipcRenderer.invoke('local-usecase:create-voucher', payload),
     createPurchase: (payload) => ipcRenderer.invoke('local-usecase:create-purchase', payload),
     createSaleReturn: (payload) => ipcRenderer.invoke('local-usecase:create-sale-return', payload),

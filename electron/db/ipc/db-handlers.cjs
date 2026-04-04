@@ -11,6 +11,7 @@ const {
 } = require('../repositories/local-store.repo.cjs');
 const {
   createSaleWithAccountingTx,
+  updateSaleWithAccountingTx,
   createVoucherWithAccountingTx,
   createPurchaseWithAccountingTx,
   createSaleReturnTx,
@@ -36,6 +37,7 @@ function registerDbHandlers() {
   ipcMain.handle('local-store:atomic', async (_event, ops) => runAtomicOps(ops));
 
   ipcMain.handle('local-usecase:create-sale', async (_event, payload) => createSaleWithAccountingTx(payload));
+  ipcMain.handle('local-usecase:update-sale', async (_event, payload) => updateSaleWithAccountingTx(payload));
   ipcMain.handle('local-usecase:create-voucher', async (_event, payload) => createVoucherWithAccountingTx(payload));
   ipcMain.handle('local-usecase:create-purchase', async (_event, payload) => createPurchaseWithAccountingTx(payload));
   ipcMain.handle('local-usecase:create-sale-return', async (_event, payload) => createSaleReturnTx(payload));

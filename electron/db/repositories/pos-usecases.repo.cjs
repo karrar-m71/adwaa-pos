@@ -127,6 +127,105 @@ function findCustomerByNameTx(db, customerName) {
   };
 }
 
+function readDebtByCurrency(data = {}) {
+  return {
+    IQD: Number(data?.debtByCurrency?.IQD ?? data?.debt ?? 0) || 0,
+    USD: Number(data?.debtByCurrency?.USD ?? 0) || 0,
+  };
+}
+
+function readTotalPurchasesByCurrency(data = {}) {
+  return {
+    IQD: Number(data?.totalPurchasesByCurrency?.IQD ?? data?.totalPurchases ?? 0) || 0,
+    USD: Number(data?.totalPurchasesByCurrency?.USD ?? 0) || 0,
+  };
+}
+
+function findDocsByCollectionTx(db, collectionName) {
+  const rows = db.prepare(`
+    SELECT * FROM documents
+    WHERE collection_name = @collection_name
+      AND is_deleted = 0
+  `).all({ collection_name: normalizePath(collectionName) });
+  return rows.map((row) => ({
+    row,
+    id: row.doc_id,
+    path: row.doc_path,
+    data: row.data_json ? JSON.parse(row.data_json) : {},
+  }));
+}
+
+function softDeleteDocTx(db, docPath) {
+  const row = getByDocPathTx(db, docPath);
+  if (!row) return false;
+  const ts = nowIso();
+  db.prepare(`
+    UPDATE documents
+    SET is_deleted = 1,
+        sync_status = 'pending_delete',
+        retry_count = 0,
+        last_error = NULL,
+        updated_at = @updated_at
+    WHERE doc_path = @doc_path
+  `).run({
+    doc_path: docPath,
+    updated_at: ts,
+  });
+  enqueueTx(db, {
+    localId: row.local_id,
+    collectionName: row.collection_name,
+    docPath,
+    opType: 'delete',
+    payload: null,
+  });
+  return true;
+}
+
+function buildSaleNormalizedItems(items = [], currency = 'IQD', exchangeRate = 1) {
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const qty = Number(item.qty || 0);
+    const unitPriceIQD = Number(item.priceIQD ?? item.price ?? 0);
+    const unitPriceDisplay = Number(item.priceDisplay ?? (currency === 'USD' ? (unitPriceIQD / Number(exchangeRate || 1)) : unitPriceIQD));
+    const lineSubtotalIQD = Number(item.lineSubtotal ?? (unitPriceIQD * qty));
+    const lineDiscountAmountIQD = Number(item.lineDiscountAmount || 0);
+    return {
+      id: String(item.id || item.productId || '').trim(),
+      name: item.name || '',
+      qty,
+      price: unitPriceIQD,
+      priceDisplay: unitPriceDisplay,
+      currency,
+      sellType: item.sellType || (item.isPackage ? 'package' : 'unit'),
+      isPackage: Boolean(item.isPackage),
+      packageName: item.packageName || '',
+      packageQty: Number(item.packageQty || 1),
+      lineSubtotal: lineSubtotalIQD,
+      lineDiscount: Number(item.lineDiscount || 0),
+      lineDiscountType: item.lineDiscountType || 'fixed',
+      lineDiscountAmount: lineDiscountAmountIQD,
+      lineDiscountAmountDisplay: Number(item.lineDiscountAmountDisplay ?? (currency === 'USD' ? (lineDiscountAmountIQD / Number(exchangeRate || 1)) : lineDiscountAmountIQD)),
+      total: Number(item.total ?? Math.max(0, lineSubtotalIQD - lineDiscountAmountIQD)),
+    };
+  });
+}
+
+function sumQtyByProduct(items = []) {
+  const output = {};
+  (items || []).forEach((item) => {
+    const productId = String(item?.id || '').trim();
+    if (!productId) return;
+    const qtyUnits = Boolean(item?.isPackage)
+      ? Number(item?.qty || 0) * Math.max(1, Number(item?.packageQty || 1))
+      : Number(item?.qty || 0);
+    output[productId] = Number(output[productId] || 0) + qtyUnits;
+  });
+  return output;
+}
+
+function generateLinkedVoucherNo(invoiceNo = '') {
+  return `V-C-${String(invoiceNo || '').replace(/[^\w-]+/g, '') || Date.now()}`;
+}
+
 function generateInvoiceNo(prefix = 'INV') {
   const seq = nextCounter(`counter:${prefix}`);
   return `${prefix}-${String(seq).padStart(6, '0')}`;
@@ -286,6 +385,7 @@ function createSaleWithAccountingTx(input = {}) {
         dateISO: todayIso(),
         date: nowHuman(),
         source: 'sales_auto',
+        linkedSaleId: '',
         linkedSaleNo: invoiceNo,
         addedBy: payload.cashier || '',
         status: 'مؤكد',
@@ -323,7 +423,7 @@ function createSaleWithAccountingTx(input = {}) {
       dateISO: todayIso(),
       date: nowHuman(),
       createdAt: ts,
-      ...(linkedVoucherNo ? { linkedVoucherNo } : {}),
+      ...(linkedVoucherNo ? { linkedVoucherNo, linkedVoucherId: `pos_vouchers/${linkedVoucherNo}` } : {}),
     };
 
     upsertDocTx(db, `pos_sales/${saleDocId}`, saleDoc, false);
@@ -344,9 +444,302 @@ function createSaleWithAccountingTx(input = {}) {
         linkedSaleId: saleDocId,
         createdAt: ts,
       }, false);
+      saleDoc.linkedExpenseId = expenseId;
+      upsertDocTx(db, `pos_sales/${saleDocId}`, saleDoc, false);
+    }
+
+    if (linkedVoucherNo) {
+      const vouchers = findDocsByCollectionTx(db, 'pos_vouchers');
+      const linkedVoucher = vouchers.find((entry) => entry.data?.linkedSaleNo === invoiceNo && entry.data?.source === 'sales_auto');
+      if (linkedVoucher) {
+        upsertDocTx(db, linkedVoucher.path, {
+          ...linkedVoucher.data,
+          linkedSaleId: saleDocId,
+          linkedSaleNo: invoiceNo,
+        }, false);
+        saleDoc.linkedVoucherId = linkedVoucher.id;
+        upsertDocTx(db, `pos_sales/${saleDocId}`, saleDoc, false);
+      }
     }
 
     return { id: saleDocId, ...saleDoc };
+  });
+
+  return tx(input);
+}
+
+function updateSaleWithAccountingTx(input = {}) {
+  const db = getDb();
+  const tx = db.transaction((payload) => {
+    const saleId = String(payload.id || payload.invoiceId || '').trim();
+    if (!saleId) throw new Error('Invoice id is required');
+    const saleRow = getByDocPathTx(db, `pos_sales/${saleId}`);
+    if (!saleRow || Number(saleRow.is_deleted || 0) === 1) throw new Error('Invoice not found');
+    const oldSale = saleRow.data_json ? JSON.parse(saleRow.data_json) : {};
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) throw new Error('Sale items are required');
+
+    const invoiceNo = oldSale.invoiceNo || payload.invoiceNo || generateInvoiceNo('INV');
+    const currency = payload.currency === 'USD' ? 'USD' : 'IQD';
+    const exchangeRate = Number(payload.exchangeRate || oldSale.exchangeRate || 1) || 1;
+    const ts = nowIso();
+
+    const grossSubtotal = Number(payload.grossSubtotal || 0);
+    const itemDiscountAmount = Number(payload.itemDiscountAmount || 0);
+    const subtotal = Number(payload.subtotal || 0);
+    const discount = Number(payload.discount || 0);
+    const discountType = String(payload.discountType || 'percent');
+    const discountAmount = Number(payload.discountAmount || 0);
+    const totalDisplay = Number(payload.totalDisplay || payload.total || 0);
+    const receivedAmountDisplay = Number(payload.receivedAmountDisplay ?? payload.receivedAmount ?? 0);
+    const appliedAmountDisplay = Math.min(receivedAmountDisplay, totalDisplay);
+    const remainingAmountDisplay = Math.max(0, totalDisplay - appliedAmountDisplay);
+    const paymentMethod = remainingAmountDisplay > 0 ? 'آجل' : 'نقدي';
+    const customerName = String(payload.customer || 'زبون عام').trim() || 'زبون عام';
+    const customerPhone = String(payload.customerPhone || '').trim();
+    const customerAddress = String(payload.customerAddress || '').trim();
+
+    const normalizedItems = buildSaleNormalizedItems(items, currency, exchangeRate);
+    const oldQtyMap = sumQtyByProduct(oldSale.items || []);
+    const newQtyMap = sumQtyByProduct(normalizedItems);
+    const productIds = [...new Set([...Object.keys(oldQtyMap), ...Object.keys(newQtyMap)])];
+
+    for (const productId of productIds) {
+      const row = getByDocPathTx(db, `pos_products/${productId}`);
+      if (!row) throw new Error(`Product not found: ${productId}`);
+      const product = row.data_json ? JSON.parse(row.data_json) : {};
+      const availableUnits = Number(product.stock || 0) + Number(oldQtyMap[productId] || 0);
+      const neededUnits = Number(newQtyMap[productId] || 0);
+      if (availableUnits < neededUnits) throw new Error(`Insufficient stock for ${product.name || productId}`);
+    }
+
+    for (const productId of productIds) {
+      const row = getByDocPathTx(db, `pos_products/${productId}`);
+      if (!row) continue;
+      const product = row.data_json ? JSON.parse(row.data_json) : {};
+      const oldQty = Number(oldQtyMap[productId] || 0);
+      const newQty = Number(newQtyMap[productId] || 0);
+      const nextStock = Number(product.stock || 0) + oldQty - newQty;
+      const nextSoldCount = Math.max(0, Number(product.soldCount || 0) - oldQty + newQty);
+      upsertDocTx(db, `pos_products/${productId}`, {
+        ...product,
+        stock: nextStock,
+        soldCount: nextSoldCount,
+        updatedAt: ts,
+      }, false);
+    }
+
+    const getCustomerRef = (customerId, name) => {
+      if (customerId) {
+        const row = getByDocPathTx(db, `pos_customers/${customerId}`);
+        if (row) {
+          return {
+            id: row.doc_id,
+            path: row.doc_path,
+            data: row.data_json ? JSON.parse(row.data_json) : {},
+          };
+        }
+      }
+      if (name && name !== 'زبون عام') return findCustomerByNameTx(db, name);
+      return null;
+    };
+
+    const oldCustomerName = String(oldSale.customer || '').trim();
+    const oldCustomerRef = getCustomerRef(oldSale.customerId, oldCustomerName);
+    let newCustomerRef = getCustomerRef(payload.customerId, customerName);
+
+    if (!newCustomerRef && customerName && customerName !== 'زبون عام') {
+      const newCustomerId = randomUUID().replace(/-/g, '').slice(0, 20);
+      const created = upsertDocTx(db, `pos_customers/${newCustomerId}`, {
+        name: customerName,
+        phone: customerPhone,
+        address: customerAddress,
+        debt: 0,
+        debtByCurrency: { IQD: 0, USD: 0 },
+        totalPurchases: 0,
+        totalPurchasesByCurrency: { IQD: 0, USD: 0 },
+        createdAt: ts,
+      }, false);
+      newCustomerRef = {
+        id: created.id,
+        path: created.path,
+        data: created.data,
+      };
+    }
+
+    const oldCurrency = oldSale.currency === 'USD' ? 'USD' : 'IQD';
+    const oldRate = Number(oldSale.exchangeRate || 1) || 1;
+    const oldTotalDisplay = oldCurrency === 'USD' ? Number(oldSale.total || 0) / oldRate : Number(oldSale.total || 0);
+    const oldDueDisplay = oldCurrency === 'USD'
+      ? Number(oldSale.dueAmount ?? oldSale.remainingAmount ?? 0) / oldRate
+      : Number(oldSale.dueAmount ?? oldSale.remainingAmount ?? 0);
+
+    const applyCustomerLedger = (ref, { totalDelta = 0, dueDelta = 0, currencyCode = 'IQD', nextName = '', nextPhone = '', nextAddress = '' } = {}) => {
+      if (!ref) return;
+      const current = ref.data || {};
+      const totalsByCurrency = readTotalPurchasesByCurrency(current);
+      const debtByCurrency = readDebtByCurrency(current);
+      if (currencyCode === 'USD') {
+        totalsByCurrency.USD = Math.max(0, Number(totalsByCurrency.USD || 0) + Number(totalDelta || 0));
+        debtByCurrency.USD = Math.max(0, Number(debtByCurrency.USD || 0) + Number(dueDelta || 0));
+      } else {
+        totalsByCurrency.IQD = Math.max(0, Number(totalsByCurrency.IQD || 0) + Number(totalDelta || 0));
+        debtByCurrency.IQD = Math.max(0, Number(debtByCurrency.IQD || 0) + Number(dueDelta || 0));
+      }
+      ref.data = {
+        ...current,
+        name: nextName || current.name || '',
+        phone: nextPhone || current.phone || '',
+        address: nextAddress || current.address || '',
+        debt: Number(debtByCurrency.IQD || 0),
+        debtByCurrency,
+        totalPurchases: Math.max(0, Number(totalsByCurrency.IQD || 0)),
+        totalPurchasesByCurrency: totalsByCurrency,
+        updatedAt: ts,
+      };
+      upsertDocTx(db, ref.path, ref.data, false);
+    };
+
+    if (oldCustomerRef && oldCustomerName && oldCustomerName !== 'زبون عام') {
+      applyCustomerLedger(oldCustomerRef, {
+        totalDelta: -oldTotalDisplay,
+        dueDelta: -oldDueDisplay,
+        currencyCode: oldCurrency,
+      });
+    }
+
+    const previousDebtByCurrency = newCustomerRef ? readDebtByCurrency(newCustomerRef.data) : { IQD: 0, USD: 0 };
+    const previousDebt = currency === 'USD' ? Number(previousDebtByCurrency.USD || 0) : Number(previousDebtByCurrency.IQD || 0);
+
+    if (newCustomerRef && customerName !== 'زبون عام') {
+      applyCustomerLedger(newCustomerRef, {
+        totalDelta: totalDisplay,
+        dueDelta: remainingAmountDisplay,
+        currencyCode: currency,
+        nextName: customerName,
+        nextPhone: customerPhone,
+        nextAddress: customerAddress,
+      });
+    }
+
+    const linkedVouchers = findDocsByCollectionTx(db, 'pos_vouchers').filter((entry) => (
+      entry.data?.linkedSaleId === saleId
+      || entry.data?.linkedSaleNo === invoiceNo
+      || entry.data?.linkedSaleNo === oldSale.invoiceNo
+    ));
+    linkedVouchers.forEach((entry) => softDeleteDocTx(db, entry.path));
+
+    const linkedExpenses = findDocsByCollectionTx(db, 'pos_expenses').filter((entry) => (
+      entry.data?.source === 'sale_discount_auto'
+      && (
+        entry.data?.linkedSaleId === saleId
+        || entry.data?.linkedSaleNo === invoiceNo
+        || entry.data?.linkedSaleNo === oldSale.invoiceNo
+      )
+    ));
+    linkedExpenses.forEach((entry) => softDeleteDocTx(db, entry.path));
+
+    let linkedVoucherNo = '';
+    let linkedVoucherId = '';
+    if (paymentMethod === 'آجل' && newCustomerRef && appliedAmountDisplay > 0) {
+      linkedVoucherNo = oldSale.linkedVoucherNo || generateLinkedVoucherNo(invoiceNo);
+      linkedVoucherId = oldSale.linkedVoucherId || randomUUID().replace(/-/g, '').slice(0, 20);
+      upsertDocTx(db, `pos_vouchers/${linkedVoucherId}`, {
+        voucherNo: linkedVoucherNo,
+        type: 'قبض',
+        amount: currency === 'USD' ? appliedAmountDisplay : appliedAmountDisplay,
+        amountIQD: currency === 'USD' ? appliedAmountDisplay * exchangeRate : appliedAmountDisplay,
+        amountIQDEntry: currency === 'USD' ? 0 : appliedAmountDisplay,
+        amountUSDEntry: currency === 'USD' ? appliedAmountDisplay : 0,
+        currency: currency === 'USD' ? 'دولار أمريكي' : 'دينار عراقي',
+        exchangeRate: currency === 'USD' ? exchangeRate : 1,
+        fromTo: customerName,
+        description: `دفعة تلقائية مرتبطة بفاتورة البيع ${invoiceNo}`,
+        paymentMethod: 'نقدي',
+        dateISO: payload.dateISO || oldSale.dateISO || todayIso(),
+        date: payload.date || oldSale.date || nowHuman(),
+        source: 'sales_auto',
+        linkedSaleId: saleId,
+        linkedSaleNo: invoiceNo,
+        addedBy: payload.cashier || oldSale.cashier || '',
+        status: 'مؤكد',
+        createdAt: oldSale.createdAt || ts,
+        updatedAt: ts,
+      }, false);
+    }
+
+    const saleDiscountLoss = Math.max(0, Number(itemDiscountAmount || 0) + Number(discountAmount || 0));
+    let linkedExpenseId = '';
+    if (saleDiscountLoss > 0) {
+      linkedExpenseId = oldSale.linkedExpenseId || randomUUID().replace(/-/g, '').slice(0, 20);
+      upsertDocTx(db, `pos_expenses/${linkedExpenseId}`, {
+        desc: `خصم فاتورة بيع رقم ${invoiceNo} للزبون ${customerName}`,
+        amount: saleDiscountLoss,
+        cat: 'خسائر',
+        dateISO: payload.dateISO || oldSale.dateISO || todayIso(),
+        date: payload.date || oldSale.date || nowHuman(),
+        addedBy: payload.cashier || oldSale.cashier || '',
+        source: 'sale_discount_auto',
+        linkedSaleNo: invoiceNo,
+        linkedSaleId: saleId,
+        createdAt: oldSale.createdAt || ts,
+        updatedAt: ts,
+      }, false);
+    }
+
+    const totalIQD = currency === 'USD' ? totalDisplay * exchangeRate : totalDisplay;
+    const paidAmountIQD = currency === 'USD' ? appliedAmountDisplay * exchangeRate : appliedAmountDisplay;
+    const dueAmountIQD = currency === 'USD' ? remainingAmountDisplay * exchangeRate : remainingAmountDisplay;
+    const receivedAmountIQD = currency === 'USD' ? receivedAmountDisplay * exchangeRate : receivedAmountDisplay;
+    const accountTotalIQD = (currency === 'USD' ? Number((newCustomerRef?.data?.debtByCurrency?.USD || 0)) * exchangeRate : 0)
+      + Number(newCustomerRef?.data?.debtByCurrency?.IQD || 0);
+
+    const saleDoc = {
+      ...oldSale,
+      invoiceNo,
+      items: normalizedItems,
+      grossSubtotal: currency === 'USD' ? grossSubtotal * exchangeRate : grossSubtotal,
+      itemDiscountAmount: currency === 'USD' ? itemDiscountAmount * exchangeRate : itemDiscountAmount,
+      subtotal: currency === 'USD' ? subtotal * exchangeRate : subtotal,
+      discount,
+      discountType,
+      discountAmount: currency === 'USD' ? discountAmount * exchangeRate : discountAmount,
+      total: totalIQD,
+      currency,
+      exchangeRate: currency === 'USD' ? exchangeRate : 1,
+      paymentMethod,
+      customer: customerName,
+      customerId: newCustomerRef?.id || '',
+      customerPhone,
+      customerAddress,
+      cashier: payload.cashier || oldSale.cashier || '',
+      paidAmount: paidAmountIQD,
+      dueAmount: dueAmountIQD,
+      remainingAmount: dueAmountIQD,
+      receivedAmount: receivedAmountIQD,
+      previousDebt: currency === 'USD' ? previousDebt * exchangeRate : previousDebt,
+      accountTotal: accountTotalIQD,
+      cash: receivedAmountIQD,
+      change: currency === 'USD' ? Math.max(0, receivedAmountDisplay - totalDisplay) * exchangeRate : Math.max(0, receivedAmountDisplay - totalDisplay),
+      dateISO: payload.dateISO || oldSale.dateISO || todayIso(),
+      date: payload.date || oldSale.date || nowHuman(),
+      createdAt: oldSale.createdAt || ts,
+      updatedAt: ts,
+      linkedVoucherNo,
+      linkedVoucherId,
+      linkedExpenseId,
+    };
+
+    if (!linkedVoucherNo) {
+      delete saleDoc.linkedVoucherNo;
+      delete saleDoc.linkedVoucherId;
+    }
+    if (!linkedExpenseId) {
+      delete saleDoc.linkedExpenseId;
+    }
+
+    upsertDocTx(db, `pos_sales/${saleId}`, saleDoc, false);
+    return { id: saleId, ...saleDoc };
   });
 
   return tx(input);
@@ -879,6 +1272,7 @@ function createPurchaseReturnTx(input = {}) {
 module.exports = {
   listByCollection,
   createSaleWithAccountingTx,
+  updateSaleWithAccountingTx,
   createVoucherWithAccountingTx,
   createPurchaseWithAccountingTx,
   createSaleReturnTx,

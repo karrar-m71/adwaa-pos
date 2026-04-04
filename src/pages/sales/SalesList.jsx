@@ -6,6 +6,7 @@ import { getUnitPriceByMode, PRICE_MODES } from '../../utils/pricing';
 import { getErrorMessage, getExchangeRate, genInvoiceNo, getPreferredCurrency, setPreferredCurrency } from '../../utils/helpers';
 import { getOfflineImagePreview, isOfflineImageRef } from '../../utils/offlineImageQueue';
 import { hasLocalApi, localCreateSale, runLocalSync } from '../../data/api/localApi';
+import { buildInvoiceEditDraft, explainInvoiceError, getInvoiceById, printInvoice, updateInvoice as updateInvoiceService } from '../../services/invoiceService';
 
 const UI = {
   bg: '#F6F8FC',
@@ -214,7 +215,7 @@ const PCard = memo(function PCard({ p, packages, onAdd, onInfo, priceMode }) {
 });
 
 // ── لوحة السلة (فاتورة واحدة) ─────────────────
-const CartPanel = memo(function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode, initialDraft, onDraftApplied }) {
+const CartPanel = memo(function CartPanel({ tabId, products, packages, customers, user, currency, exchangeRate, onClose, priceMode, initialDraft, onDraftApplied, onUpdateInvoice }) {
   const [cart,      setCart]       = useState([]);
   const [customer,  setCustomer]   = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -225,6 +226,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
   const [allowNeg,  setAllowNeg]   = useState(false);
   const [saving,    setSaving]     = useState(false);
   const [done,      setDone]       = useState(null);
+  const [editSession, setEditSession] = useState(null);
 
   useEffect(()=>{
     const handler=(e)=>{
@@ -262,11 +264,34 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
       setDiscountType(initialDraft.discountType || 'percent');
       setReceived(initialDraft.received || '');
       setAllowNeg(Boolean(initialDraft.allowNeg));
+      setEditSession(initialDraft.mode === 'edit' && initialDraft.invoiceId
+        ? {
+            mode: 'edit',
+            invoiceId: initialDraft.invoiceId,
+            invoiceNo: initialDraft.invoiceNo || '',
+            createdAt: initialDraft.createdAt || '',
+            dateISO: initialDraft.dateISO || '',
+            date: initialDraft.date || '',
+          }
+        : null);
       onDraftApplied?.(tabId);
     } catch (error) {
       console.error('[adwaa-sales] Unable to hydrate draft invoice', error);
     }
   }, [initialDraft, onDraftApplied, tabId]);
+
+  const resetPanel = () => {
+    setDone(null);
+    setCart([]);
+    setCustomer('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setDiscount(0);
+    setDiscountType('percent');
+    setReceived('');
+    setAllowNeg(false);
+    setEditSession(null);
+  };
 
   const addItem=(p,sellType)=>{
     const pkg=packages.find(pk=>pk.id===p.packageTypeId);
@@ -351,6 +376,39 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
     }
     setSaving(true);
     try{
+      if (editSession?.invoiceId) {
+        const updatedInvoice = await onUpdateInvoice?.({
+          mode: 'edit',
+          invoiceId: editSession.invoiceId,
+          invoiceNo: editSession.invoiceNo,
+          createdAt: editSession.createdAt,
+          dateISO: editSession.dateISO,
+          date: editSession.date,
+          customer,
+          customerPhone,
+          customerAddress,
+          discount,
+          discountType,
+          received,
+          currency,
+          exchangeRate,
+          items: cart,
+        });
+        setDone(updatedInvoice || {
+          invoiceNo: editSession.invoiceNo,
+          customer,
+          paymentMethod: payMethod,
+          total: currency === 'USD' ? total * exchangeRate : total,
+          currency,
+          exchangeRate,
+          receivedAmount: currency === 'USD' ? receivedAmount * exchangeRate : receivedAmount,
+          remainingAmount: currency === 'USD' ? remainingAmount * exchangeRate : remainingAmount,
+          updatedAt: new Date().toISOString(),
+        });
+        setEditSession(null);
+        setSaving(false);
+        return;
+      }
       const invoiceNo = genInvoiceNo('INV');
       const totalIQD=currency==='USD'?total*exchangeRate:total;
       const paidAmountIQD = currency==='USD'?appliedAmount*exchangeRate:appliedAmount;
@@ -534,6 +592,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
         {done.paymentMethod==='آجل'?'تسجيل آجل!':'تمت عملية البيع!'}
       </div>
       <div style={{color:UI.muted,fontSize:12,marginBottom:4}}>{done.invoiceNo}</div>
+      {done.updatedAt && <div style={{color:UI.info,fontSize:11,fontWeight:700,marginBottom:4}}>تم تحديث الفاتورة بنجاح</div>}
       {/* تأكيد المزامنة */}
       <div style={{background:UI.infoSoft,border:`1px solid #93c5fd`,borderRadius:10,padding:'6px 14px',marginBottom:16}}>
         <span style={{color:UI.info,fontSize:11,fontWeight:700}}>📱 تم تحديث مخزون الموبايل</span>
@@ -555,7 +614,7 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
       </div>
       <div style={{display:'flex',gap:8,width:'100%'}}>
         <button onClick={()=>printInv(done)} style={{flex:1,background:UI.info,color:'#fff',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:13}}>🖨️ طباعة</button>
-        <button onClick={()=>{setDone(null);setCart([]);setCustomer('');setCustomerPhone('');setCustomerAddress('');setDiscount(0);setDiscountType('percent');setReceived('');}} style={{flex:1,background:UI.accent,color:'#fff',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:13}}>+ جديدة</button>
+        <button onClick={resetPanel} style={{flex:1,background:UI.accent,color:'#fff',border:'none',borderRadius:10,padding:10,fontWeight:700,cursor:'pointer',fontFamily:"'Cairo'",fontSize:13}}>+ جديدة</button>
       </div>
     </div>
   );
@@ -717,7 +776,11 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
         {payMethod==='آجل'&&!customer.trim()&&<div style={{color:UI.danger,fontSize:10,textAlign:'center',marginBottom:4}}>أدخل اسم الزبون أعلاه</div>}
         <button onClick={save} disabled={saving||!cart.length||(payMethod==='آجل'&&!customer.trim())}
           style={{width:'100%',background:(!cart.length||(payMethod==='آجل'&&!customer.trim()))?'#E2E8F0':payMethod==='آجل'?'linear-gradient(135deg,#f59e0b,#d97706)':`linear-gradient(135deg,${UI.accent},#A86E00)`,color:'#fff',border:'none',borderRadius:10,padding:12,fontWeight:800,fontSize:13,cursor:(!cart.length||(payMethod==='آجل'&&!customer.trim()))?'not-allowed':'pointer'}}>
-          {saving?'⏳ جاري الحفظ...':`✅ حفظ الفاتورة ${fmtCur(total,currency)}`}
+          {saving
+            ? '⏳ جاري الحفظ...'
+            : editSession?.invoiceId
+              ? `💾 تحديث الفاتورة ${editSession.invoiceNo || ''}`
+              : `✅ حفظ الفاتورة ${fmtCur(total,currency)}`}
         </button>
       </div>
     </div>
@@ -745,6 +808,7 @@ export default function SalesList({ user }) {
   const [listSearchInput,setListSearchInput]= useState('');
   const [listSearch,setListSearch]= useState('');
   const [draftsByTab,setDraftsByTab] = useState({});
+  const [rowActionState,setRowActionState] = useState({});
   const deferredSearch = useDeferredValue(search);
 
   useEffect(()=>{
@@ -794,41 +858,13 @@ export default function SalesList({ user }) {
 
   const repeatSaleIntoNewTab = (sale) => {
     const id = _tabId++;
-    setTabs((current) => [...current, { id, label:`إعادة ${sale.invoiceNo || id}` }]);
+    setTabs((current) => [...current, { id, label:`تعديل ${sale.invoiceNo || id}` }]);
     setActiveTab(id);
     if (sale?.currency === 'USD' || sale?.currency === 'IQD') setCurrency(sale.currency);
+    setView('pos');
     setDraftsByTab((current) => ({
       ...current,
-      [id]: {
-        customer: sale.customer || '',
-        customerPhone: sale.customerPhone || '',
-        customerAddress: sale.customerAddress || '',
-        discount: Number(sale.discount || 0),
-        discountType: sale.discountType || 'percent',
-        received: sale.receivedAmount ?? sale.cash ?? '',
-        allowNeg: false,
-        items: (sale.items || []).map((item) => {
-          const product = products.find((p) => p.id === item.id) || {};
-          const sellType = item.sellType || (item.isPackage ? 'package' : 'unit');
-          return {
-            key: `${item.id}_${sellType}`,
-            id: item.id,
-            name: item.name,
-            img: product.img || item.img || '',
-            imgUrl: product.imgUrl || item.imgUrl || '',
-            qty: Number(item.qty || 1),
-            price: Number(item.priceDisplay ?? (sale.currency === 'USD' ? (Number(item.price || 0) / Number(sale.exchangeRate || 1)) : Number(item.price || 0))),
-            priceIQD: Number(item.price || 0),
-            sellType,
-            isPackage: Boolean(item.isPackage),
-            packageName: item.packageName || '',
-            packageQty: Number(item.packageQty || 1),
-            lineDiscount: Number(item.lineDiscount || 0),
-            lineDiscountType: item.lineDiscountType || 'fixed',
-            stock: Number(product.stock || 0),
-          };
-        }),
-      },
+      [id]: buildInvoiceEditDraft(sale, products),
     }));
   };
 
@@ -839,6 +875,57 @@ export default function SalesList({ user }) {
       delete next[tabId];
       return next;
     });
+  };
+
+  const setRowAction = (invoiceId, action) => {
+    setRowActionState((current) => ({ ...current, [invoiceId]: action }));
+  };
+
+  const clearRowAction = (invoiceId) => {
+    setRowActionState((current) => {
+      if (!current[invoiceId]) return current;
+      const next = { ...current };
+      delete next[invoiceId];
+      return next;
+    });
+  };
+
+  const handlePrint = async (invoiceId) => {
+    if (!invoiceId || rowActionState[invoiceId]) return;
+    setRowAction(invoiceId, 'print');
+    try {
+      await printInvoice(invoiceId, { customers });
+    } catch (error) {
+      console.error('[adwaa-invoice] Print failed', error);
+      alert(explainInvoiceError(error, 'تعذر طباعة الفاتورة'));
+    } finally {
+      clearRowAction(invoiceId);
+    }
+  };
+
+  const handleEdit = async (invoiceId) => {
+    if (!invoiceId || rowActionState[invoiceId]) return;
+    setRowAction(invoiceId, 'edit');
+    try {
+      const invoice = await getInvoiceById(invoiceId);
+      repeatSaleIntoNewTab(invoice);
+    } catch (error) {
+      console.error('[adwaa-invoice] Edit load failed', error);
+      alert(explainInvoiceError(error, 'تعذر تحميل الفاتورة للتعديل'));
+    } finally {
+      clearRowAction(invoiceId);
+    }
+  };
+
+  const handleUpdateInvoice = async (draft) => {
+    try {
+      await updateInvoiceService(draft, { products, customers, user });
+      const updatedInvoice = await getInvoiceById(draft.invoiceId);
+      return updatedInvoice;
+    } catch (error) {
+      console.error('[adwaa-invoice] Update failed', error);
+      throw new Error(explainInvoiceError(error, 'تعذر تحديث الفاتورة'));
+    }
   };
 
   const closeTab=(id)=>{
@@ -982,11 +1069,11 @@ export default function SalesList({ user }) {
             <span style={{background:s.paymentMethod==='آجل'?'#fff7ed':s.paymentMethod==='نقدي'?UI.successSoft:UI.infoSoft,borderRadius:20,padding:'2px 7px',color:s.paymentMethod==='آجل'?'#f59e0b':s.paymentMethod==='نقدي'?UI.success:UI.info,fontSize:9,fontWeight:700,display:'inline-block'}}>{s.paymentMethod}</span>
             <div style={{color:UI.muted,fontSize:10}}>{s.cashier}</div>
             <div style={{color:UI.subtle,fontSize:9}}>{s.dateISO}</div>
-            <button onClick={() => printInv(s)} style={{background:UI.infoSoft,border:'1px solid #93c5fd',borderRadius:8,padding:'4px 10px',color:UI.info,fontSize:10,cursor:'pointer',fontFamily:"'Cairo'",fontWeight:700}}>
-              طباعة
+            <button disabled={Boolean(rowActionState[s.id])} onClick={() => handlePrint(s.id)} style={{background:UI.infoSoft,border:'1px solid #93c5fd',borderRadius:8,padding:'4px 10px',color:UI.info,fontSize:10,cursor:rowActionState[s.id]?'wait':'pointer',fontFamily:"'Cairo'",fontWeight:700,opacity:rowActionState[s.id]?0.7:1}}>
+              {rowActionState[s.id] === 'print' ? '...' : 'طباعة'}
             </button>
-            <button onClick={() => repeatSaleIntoNewTab(s)} style={{background:UI.accentSoft,border:'1px solid #fcd34d',borderRadius:8,padding:'4px 10px',color:UI.accent,fontSize:10,cursor:'pointer',fontFamily:"'Cairo'",fontWeight:700}}>
-              تعديل
+            <button disabled={Boolean(rowActionState[s.id])} onClick={() => handleEdit(s.id)} style={{background:UI.accentSoft,border:'1px solid #fcd34d',borderRadius:8,padding:'4px 10px',color:UI.accent,fontSize:10,cursor:rowActionState[s.id]?'wait':'pointer',fontFamily:"'Cairo'",fontWeight:700,opacity:rowActionState[s.id]?0.7:1}}>
+              {rowActionState[s.id] === 'edit' ? '...' : 'تعديل'}
             </button>
             <button onClick={() => removeSale(s)} style={{background:UI.dangerSoft,border:'1px solid #fca5a5',borderRadius:8,padding:'4px 10px',color:UI.danger,fontSize:10,cursor:'pointer',fontFamily:"'Cairo'",fontWeight:700}}>
               حذف
@@ -1080,6 +1167,7 @@ export default function SalesList({ user }) {
                 customers={customers} user={user} currency={currency} exchangeRate={rate} priceMode={priceMode}
                 initialDraft={draftsByTab[tab.id] || null}
                 onDraftApplied={clearDraftForTab}
+                onUpdateInvoice={handleUpdateInvoice}
               onClose={()=>closeTab(tab.id)}/>
             </div>
         ))}

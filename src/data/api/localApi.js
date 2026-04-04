@@ -77,6 +77,11 @@ export async function localCreateSale(payload) {
   return window.adwaaLocal.usecases.createSale(payload);
 }
 
+export async function localUpdateSale(payload) {
+  if (!hasLocalApi()) throw new Error('Local API unavailable');
+  return window.adwaaLocal.usecases.updateSale(payload);
+}
+
 export async function localCreateVoucher(payload) {
   if (!hasLocalApi()) throw new Error('Local API unavailable');
   return window.adwaaLocal.usecases.createVoucher(payload);
