@@ -3,6 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } fro
 import { db } from '../firebase';
 import { buildSalePricesFromBuyPrice, readPricingSettings } from '../utils/pricing';
 import { attachOfflineImageTarget, getOfflineImagePreview, isOfflineImageRef, queueOfflineImage } from '../utils/offlineImageQueue';
+import { canUser } from '../utils/permissions';
 
 const fmt = n => (n||0).toLocaleString('ar-IQ') + ' د.ع';
 const CATS = ['إلكترونيات','إضاءة','كابلات','قواطع','مفاتيح','أسلاك','أدوات','أخرى'];
@@ -55,6 +56,9 @@ async function syncToMobile(id, data) {
 }
 
 export default function Products({ user, embedded = false, initialSearch = '', openCreateOnMount = false, onProductSaved, onClose }) {
+  const canCreate = canUser(user, 'products_create');
+  const canEdit = canUser(user, 'products_edit');
+  const canDelete = canUser(user, 'products_delete');
   const [products, setProducts]   = useState([]);
   const [packages, setPackages]   = useState([]);
   const [showForm, setShowForm]   = useState(false);
@@ -129,6 +133,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   });
 
   const save = async () => {
+    if (!(editing ? canEdit : canCreate)) return alert('ليس لديك صلاحية لتعديل المواد');
     if (!form.name?.trim()) return alert('يرجى إدخال اسم المادة');
     if (!form.sellPrice || Number(form.sellPrice) <= 0) return alert('يرجى إدخال سعر البيع (يجب أن يكون أكبر من صفر)');
     if (Number(form.buyPrice) < 0) return alert('سعر الشراء لا يمكن أن يكون سالباً');
@@ -222,6 +227,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   };
 
   const del = async (id, name) => {
+    if (!canDelete) return alert('ليس لديك صلاحية لحذف المواد');
     if (!confirm(`هل أنت متأكد من حذف المادة "${name}"؟\nلا يمكن التراجع عن هذه العملية.`)) return;
     try {
       await deleteDoc(doc(db, 'pos_products', id));
@@ -233,6 +239,10 @@ export default function Products({ user, embedded = false, initialSearch = '', o
   };
 
   const edit = (p) => {
+    if (!canEdit) {
+      alert('صلاحية تعديل المواد متاحة للمدير والمحاسب فقط');
+      return;
+    }
     setForm({
       ...p,
       buyPrice:       String(p.buyPrice||''),
@@ -287,7 +297,13 @@ export default function Products({ user, embedded = false, initialSearch = '', o
             style={{background:'#3b82f622',border:'1px solid #3b82f644',borderRadius:12,padding:'10px 16px',color:'#3b82f6',cursor:'pointer',fontFamily:"'Cairo'",fontSize:13,fontWeight:700}}>
             📱 مزامنة الموبايل
           </button>
-          <button onClick={()=>{setForm(empty);setEditing(null);setShowForm(true);}}
+          <button onClick={()=>{
+            if (!canCreate) {
+              alert('صلاحية إضافة المواد متاحة للمدير والمحاسب فقط');
+              return;
+            }
+            setForm(empty);setEditing(null);setShowForm(true);
+          }}
             style={{background:'#F5C800',color:'#000',border:'none',borderRadius:12,padding:'10px 20px',fontWeight:800,cursor:'pointer',fontSize:14}}>
             + إضافة مادة
           </button>
@@ -567,7 +583,7 @@ export default function Products({ user, embedded = false, initialSearch = '', o
                 <div style={{display:'flex',gap:6}}>
                   <button onClick={()=>edit(p)}
                     style={{background:'#F5C80022',border:'1px solid #F5C80044',borderRadius:8,padding:'5px 10px',color:'#F5C800',fontSize:12,cursor:'pointer'}}>✏️</button>
-                  {user.role==='مدير'&&(
+                  {canDelete&&(
                     <button onClick={()=>del(p.id,p.name)}
                       style={{background:'#ef444422',border:'1px solid #ef444444',borderRadius:8,padding:'5px 10px',color:'#ef4444',fontSize:12,cursor:'pointer'}}>🗑️</button>
                   )}

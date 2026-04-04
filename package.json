@@ -57,6 +57,16 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
     "publish": [
       {
         "provider": "github",
@@ -70,6 +80,9 @@
       "artifactName": "Adwaa-POS-Setup-${version}.${ext}"
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },

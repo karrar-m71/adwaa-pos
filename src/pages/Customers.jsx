@@ -2,12 +2,16 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { fmtIQD, toNum, getExchangeRate, getErrorMessage, nowAR, applyDebtDelta, readDebt } from '../utils/helpers';
+import { canUser } from '../utils/permissions';
 
 const fmt    = fmtIQD;
 const fmtUsd = n => `$${(Number(n || 0)).toFixed(2)}`;
 const now    = nowAR;
 
 export default function Customers({ user }) {
+  const canCreate = canUser(user, 'customers_create');
+  const canEdit = canUser(user, 'customers_edit');
+  const canDelete = canUser(user, 'customers_delete');
   const [customers, setCustomers] = useState([]);
   const [sales, setSales]         = useState([]);
   const [showForm, setShowForm]   = useState(false);
@@ -20,6 +24,26 @@ export default function Customers({ user }) {
   const empty = { name:'', phone:'', address:'', notes:'' };
   const [form, setForm]           = useState(empty);
 
+  const openCreateForm = () => {
+    if (!canCreate) {
+      alert('ليس لديك صلاحية لإضافة زبون جديد');
+      return;
+    }
+    setForm(empty);
+    setEditing(null);
+    setShowForm(true);
+  };
+
+  const openEditForm = (customer) => {
+    if (!canEdit) {
+      alert('ليس لديك صلاحية لتعديل بيانات الزبائن');
+      return;
+    }
+    setForm({ name: customer.name, phone: customer.phone || '', address: customer.address || '', notes: customer.notes || '' });
+    setEditing(customer.id);
+    setShowForm(true);
+  };
+
   useEffect(() => {
     const u1 = onSnapshot(collection(db,'pos_customers'), s => setCustomers(s.docs.map(d=>({...d.data(),id:d.id}))));
     const u2 = onSnapshot(collection(db,'pos_sales'),     s => setSales(s.docs.map(d=>({...d.data(),id:d.id}))));
@@ -29,6 +53,7 @@ export default function Customers({ user }) {
   const filtered = customers.filter(c => !search || c.name?.includes(search) || c.phone?.includes(search));
 
   const save = async () => {
+    if (!(editing ? canEdit : canCreate)) return alert('ليس لديك صلاحية لتعديل بيانات الزبائن');
     if (!form.name?.trim()) return alert('يرجى إدخال اسم الزبون');
     try {
       if (editing) {
@@ -52,6 +77,7 @@ export default function Customers({ user }) {
   };
 
   const del = async (id, name) => {
+    if (!canDelete) return alert('ليس لديك صلاحية لحذف الزبائن');
     if (!confirm(`هل أنت متأكد من حذف الزبون "${name}"؟\nسيتم حذف كل بياناته.`)) return;
     try {
       await deleteDoc(doc(db, 'pos_customers', id));
@@ -234,7 +260,7 @@ export default function Customers({ user }) {
           <div style={{ color:'#fff', fontSize:22, fontWeight:800 }}>إدارة الزبائن</div>
           <div style={{ color:'#64748b', fontSize:13 }}>{customers.length} زبون</div>
         </div>
-        <button onClick={()=>{setForm(empty);setEditing(null);setShowForm(true);}}
+        <button onClick={openCreateForm}
           style={{ background:'#F5C800', color:'#000', border:'none', borderRadius:12, padding:'10px 20px', fontWeight:800, cursor:'pointer', fontFamily:"'Cairo'", fontSize:14 }}>
           + إضافة زبون
         </button>
@@ -327,9 +353,9 @@ export default function Customers({ user }) {
               <div style={{ display:'flex', borderTop:'1px solid #e2e8f7' }}>
                 <button onClick={()=>setSelCustomer(c)}
                   style={{ flex:1, background:'none', border:'none', borderLeft:'1px solid #e2e8f7', padding:'9px', color:'#F5C800', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:"'Cairo'" }}>👁️ عرض</button>
-                <button onClick={()=>{setForm({name:c.name,phone:c.phone||'',address:c.address||'',notes:c.notes||''});setEditing(c.id);setShowForm(true);}}
+                <button onClick={()=>openEditForm(c)}
                   style={{ flex:1, background:'none', border:'none', borderLeft:'1px solid #e2e8f7', padding:'9px', color:'#3b82f6', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:"'Cairo'" }}>✏️ تعديل</button>
-                {user.role==='مدير' && <button onClick={()=>del(c.id,c.name)}
+                {canDelete && <button onClick={()=>del(c.id,c.name)}
                   style={{ flex:1, background:'none', border:'none', padding:'9px', color:'#ef4444', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:"'Cairo'" }}>🗑️ حذف</button>}
               </div>
             </div>

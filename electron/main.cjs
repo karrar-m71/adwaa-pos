@@ -19,7 +19,7 @@ const logUpdater = (message, error = null) => {
 function resolveWindowIcon() {
   if (process.platform !== 'win32') return undefined;
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'build', 'icon.ico');
+    return path.join(process.resourcesPath, 'icon.ico');
   }
   return path.join(__dirname, '..', 'build', 'icon.ico');
 }

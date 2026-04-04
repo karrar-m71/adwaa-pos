@@ -5,8 +5,12 @@ import {
   fmtIQD, fmtUSD, toNum, nowAR, getExchangeRate,
   getErrorMessage, genInvoiceNo, applyDebtDelta, readDebt,
 } from '../utils/helpers';
+import { canUser } from '../utils/permissions';
 
 export default function Suppliers({ user }) {
+  const canCreate = canUser(user, 'suppliers_create');
+  const canEdit = canUser(user, 'suppliers_edit');
+  const canDelete = canUser(user, 'suppliers_delete');
   const [suppliers, setSuppliers]     = useState([]);
   const [purchases, setPurchases]     = useState([]);
   const [products, setProducts]       = useState([]);
@@ -28,6 +32,26 @@ export default function Suppliers({ user }) {
   // دفع الدين
   const [payAmount, setPayAmount]   = useState('');
   const [payCurrency, setPayCurrency] = useState('IQD');
+
+  const openCreateSupplierForm = useCallback(() => {
+    if (!canCreate) {
+      alert('ليس لديك صلاحية لإضافة مورد جديد');
+      return;
+    }
+    setForm(emptyS);
+    setEditing(null);
+    setShowForm(true);
+  }, [canCreate]);
+
+  const openEditSupplierForm = useCallback((supplier) => {
+    if (!canEdit) {
+      alert('ليس لديك صلاحية لتعديل بيانات الموردين');
+      return;
+    }
+    setForm({ name: supplier.name, phone: supplier.phone || '', address: supplier.address || '', notes: supplier.notes || '' });
+    setEditing(supplier.id);
+    setShowForm(true);
+  }, [canEdit]);
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, 'pos_suppliers'), s =>
@@ -55,6 +79,7 @@ export default function Suppliers({ user }) {
 
   // ── حفظ مورد ────────────────────────────────────────────────────────────────
   const saveSupplier = useCallback(async () => {
+    if (!(editing ? canEdit : canCreate)) return alert('ليس لديك صلاحية لتعديل بيانات الموردين');
     const name = form.name.trim();
     if (!name) return alert('يرجى إدخال اسم المورد');
     // التحقق من التكرار
@@ -83,10 +108,11 @@ export default function Suppliers({ user }) {
     } finally {
       setSaving(false);
     }
-  }, [form, editing, suppliers]);
+  }, [canCreate, canEdit, editing, form, suppliers]);
 
   // ── حذف مورد ────────────────────────────────────────────────────────────────
   const delSupplier = useCallback(async (s) => {
+    if (!canDelete) return alert('ليس لديك صلاحية لحذف الموردين');
     const { IQD, USD } = readDebt(s);
     const hasDebt = IQD > 0 || USD > 0;
     const msg = hasDebt
@@ -98,7 +124,7 @@ export default function Suppliers({ user }) {
     } catch (e) {
       alert(getErrorMessage(e, 'فشل حذف المورد'));
     }
-  }, []);
+  }, [canDelete]);
 
   // ── عربة المشتريات ───────────────────────────────────────────────────────────
   const addCartItem = useCallback(() =>
@@ -419,7 +445,7 @@ export default function Suppliers({ user }) {
             style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 12, padding: '10px 20px', fontWeight: 800, cursor: 'pointer', fontFamily: "'Cairo'", fontSize: 14 }}>
             🛍️ فاتورة شراء
           </button>
-          <button onClick={() => { setForm(emptyS); setEditing(null); setShowForm(true); }}
+          <button onClick={openCreateSupplierForm}
             style={{ background: '#F5C800', color: '#000', border: 'none', borderRadius: 12, padding: '10px 20px', fontWeight: 800, cursor: 'pointer', fontFamily: "'Cairo'", fontSize: 14 }}>
             + إضافة مورد
           </button>
@@ -504,9 +530,9 @@ export default function Suppliers({ user }) {
                     <button onClick={() => { setSelSupplier(s); setPayAmount(''); setPayCurrency('IQD'); setShowPayDebt(true); }}
                       style={{ flex: 1, background: '#10b98122', border: '1px solid #10b98144', borderRadius: 10, padding: '7px 0', color: '#10b981', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Cairo'" }}>💰 سداد دين</button>
                   )}
-                  <button onClick={() => { setForm({ name: s.name, phone: s.phone || '', address: s.address || '', notes: s.notes || '' }); setEditing(s.id); setShowForm(true); }}
+                  <button onClick={() => openEditSupplierForm(s)}
                     style={{ flex: 1, background: '#F5C80022', border: '1px solid #F5C80044', borderRadius: 10, padding: '7px 0', color: '#F5C800', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Cairo'" }}>✏️ تعديل</button>
-                  {user.role === 'مدير' && (
+                  {canDelete && (
                     <button onClick={() => delSupplier(s)}
                       style={{ flex: 1, background: '#ef444422', border: '1px solid #ef444444', borderRadius: 10, padding: '7px 0', color: '#ef4444', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'Cairo'" }}>🗑️ حذف</button>
                   )}

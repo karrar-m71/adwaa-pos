@@ -3,6 +3,7 @@ import { waitForPendingWrites } from 'firebase/firestore';
 import { ThemeProvider, useTheme } from './ThemeContext';
 import { db } from './firebase';
 import { startOfflineImageQueueWorker } from './utils/offlineImageQueue';
+import { canAccessPage, hasSectionAccess } from './utils/permissions';
 import Login     from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import POS       from './pages/POS';
@@ -437,6 +438,7 @@ function AppInner() {
 
   // ── فتح تبويب (أو التركيز على تبويب موجود) ──
   const openPage = (page) => {
+    if (!canAccessPage(user, page)) return;
     const existing = tabs.find(t => t.page === page);
     if (existing) { setActiveTabId(existing.id); return; }
     const id = nextTabId.current++;
@@ -452,8 +454,7 @@ function AppInner() {
     if (activeTabId === id) setActiveTabId(newTabs[Math.max(0, idx - 1)].id);
   };
 
-  const extraAccess = user.extraAccess || [];
-  const allowedNav  = NAV.filter(n => n.roles.includes(user.role) || extraAccess.includes(n.id));
+  const allowedNav  = NAV.filter(n => hasSectionAccess(user, n.id));
 
   const T = theme;
   const logo = localStorage.getItem('adwaa_logo');
@@ -647,7 +648,9 @@ function AppInner() {
             const lbl     = getPageLabel(tab.page);
             return (
               <div key={tab.id} style={{ position:'absolute', inset:0, overflow:'auto', display: tab.id === activeTabId ? 'block' : 'none' }}>
-                {TabPage
+                {!canAccessPage(user, tab.page)
+                  ? <UnauthorizedPage label={lbl.label} theme={T}/>
+                  : TabPage
                   ? <TabPage user={user}/>
                   : <ComingSoon label={lbl.label} icon={lbl.icon} theme={T}/>
                 }
@@ -686,6 +689,16 @@ function ComingSoon({ label, icon, theme: T }) {
       <div style={{ fontSize:60, marginBottom:16 }}>{icon}</div>
       <div style={{ color:T.accent, fontSize:22, fontWeight:800, marginBottom:8 }}>{label}</div>
       <div style={{ color:T.textMuted, fontSize:14 }}>هذه الصفحة قيد التطوير</div>
+    </div>
+  );
+}
+
+function UnauthorizedPage({ label, theme: T }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', fontFamily:"'Cairo'" }}>
+      <div style={{ fontSize:56, marginBottom:16 }}>🔒</div>
+      <div style={{ color:T.accent, fontSize:22, fontWeight:800, marginBottom:8 }}>{label}</div>
+      <div style={{ color:T.textMuted, fontSize:14 }}>ليس لديك صلاحية للوصول إلى هذه الصفحة</div>
     </div>
   );
 }
