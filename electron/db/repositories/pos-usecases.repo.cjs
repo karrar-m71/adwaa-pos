@@ -600,7 +600,13 @@ function updateSaleWithAccountingTx(input = {}) {
       upsertDocTx(db, ref.path, ref.data, false);
     };
 
-    if (oldCustomerRef && oldCustomerName && oldCustomerName !== 'زبون عام') {
+    const isSameCustomer = Boolean(
+      oldCustomerRef
+      && newCustomerRef
+      && oldCustomerRef.path === newCustomerRef.path
+    );
+
+    if (oldCustomerRef && oldCustomerName && oldCustomerName !== 'زبون عام' && !isSameCustomer) {
       applyCustomerLedger(oldCustomerRef, {
         totalDelta: -oldTotalDisplay,
         dueDelta: -oldDueDisplay,
@@ -613,13 +619,23 @@ function updateSaleWithAccountingTx(input = {}) {
 
     if (newCustomerRef && customerName !== 'زبون عام') {
       applyCustomerLedger(newCustomerRef, {
-        totalDelta: totalDisplay,
-        dueDelta: remainingAmountDisplay,
+        totalDelta: isSameCustomer ? (currency === oldCurrency ? totalDisplay - oldTotalDisplay : totalDisplay) : totalDisplay,
+        dueDelta: isSameCustomer ? (currency === oldCurrency ? remainingAmountDisplay - oldDueDisplay : remainingAmountDisplay) : remainingAmountDisplay,
         currencyCode: currency,
         nextName: customerName,
         nextPhone: customerPhone,
         nextAddress: customerAddress,
       });
+      if (isSameCustomer && currency !== oldCurrency) {
+        applyCustomerLedger(newCustomerRef, {
+          totalDelta: -oldTotalDisplay,
+          dueDelta: -oldDueDisplay,
+          currencyCode: oldCurrency,
+          nextName: customerName,
+          nextPhone: customerPhone,
+          nextAddress: customerAddress,
+        });
+      }
     }
 
     const linkedVouchers = findDocsByCollectionTx(db, 'pos_vouchers').filter((entry) => (

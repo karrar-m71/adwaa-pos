@@ -272,6 +272,12 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
             createdAt: initialDraft.createdAt || '',
             dateISO: initialDraft.dateISO || '',
             date: initialDraft.date || '',
+            originalQtyByProduct: (initialDraft.items || []).reduce((acc, item) => {
+              if (!item?.id) return acc;
+              const qtyUnits = Number(item.qty || 0) * (item.isPackage ? Number(item.packageQty || 1) : 1);
+              acc[item.id] = Number(acc[item.id] || 0) + qtyUnits;
+              return acc;
+            }, {}),
           }
         : null);
       onDraftApplied?.(tabId);
@@ -367,8 +373,9 @@ const CartPanel = memo(function CartPanel({ tabId, products, packages, customers
     if (!allowNeg) {
       const insufficientItem = cart.find((item) => {
         const product = products.find((p) => p.id === item.id);
+        const originalQty = Number(editSession?.originalQtyByProduct?.[item.id] || 0);
         const requestedUnits = Number(item.qty || 0) * (item.isPackage ? Number(item.packageQty || 1) : 1);
-        return requestedUnits > Number(product?.stock || 0);
+        return requestedUnits > (Number(product?.stock || 0) + originalQty);
       });
       if (insufficientItem) {
         return alert(`الكمية غير كافية للمادة: ${insufficientItem.name}`);

@@ -290,7 +290,13 @@ async function updateInvoiceInFirestore(payload, context = {}) {
     newCustomerRef = { id: customerRef.id, data: customerDoc };
   }
 
-  if (oldCustomerRef && oldInvoice.customer && oldInvoice.customer !== 'زبون عام') {
+  const isSameCustomer = Boolean(
+    oldCustomerRef
+    && newCustomerRef
+    && oldCustomerRef.id === newCustomerRef.id
+  );
+
+  if (oldCustomerRef && oldInvoice.customer && oldInvoice.customer !== 'زبون عام' && !isSameCustomer) {
     const nextTotals = applyCurrencyDelta(readTotalsByCurrency(oldCustomerRef.data), oldCurrency, -oldTotalDisplay);
     const nextDebt = applyCurrencyDelta(readDebtByCurrency(oldCustomerRef.data), oldCurrency, -oldDueDisplay);
     batch.set(doc(db, 'pos_customers', oldCustomerRef.id), {
@@ -305,8 +311,12 @@ async function updateInvoiceInFirestore(payload, context = {}) {
   if (newCustomerRef && payload.customer !== 'زبون عام') {
     const currentDebt = readDebtByCurrency(newCustomerRef.data);
     previousDebtDisplay = payload.currency === 'USD' ? Number(currentDebt.USD || 0) : Number(currentDebt.IQD || 0);
-    const nextTotals = applyCurrencyDelta(readTotalsByCurrency(newCustomerRef.data), payload.currency, payload.totalDisplay);
-    const nextDebt = applyCurrencyDelta(currentDebt, payload.currency, payload.dueAmountDisplay);
+    let nextTotals = applyCurrencyDelta(readTotalsByCurrency(newCustomerRef.data), payload.currency, payload.totalDisplay);
+    let nextDebt = applyCurrencyDelta(currentDebt, payload.currency, payload.dueAmountDisplay);
+    if (isSameCustomer) {
+      nextTotals = applyCurrencyDelta(nextTotals, oldCurrency, -oldTotalDisplay);
+      nextDebt = applyCurrencyDelta(nextDebt, oldCurrency, -oldDueDisplay);
+    }
     batch.set(doc(db, 'pos_customers', newCustomerRef.id), {
       name: payload.customer,
       phone: payload.customerPhone || '',

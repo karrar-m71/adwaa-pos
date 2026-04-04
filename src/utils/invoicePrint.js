@@ -12,11 +12,11 @@ function readBrandAssets() {
     const storedHeader = localStorage.getItem('adwaa_invoice_header') || '';
     return {
       logo: localStorage.getItem('adwaa_logo') || '',
-      invoiceHeader: storedHeader || PUBLIC_INVOICE_HEADER_PATH,
+      invoiceHeader: storedHeader,
       watermark: localStorage.getItem('adwaa_watermark') || '',
     };
   } catch {
-    return { logo: '', invoiceHeader: PUBLIC_INVOICE_HEADER_PATH, watermark: '' };
+    return { logo: '', invoiceHeader: '', watermark: '' };
   }
 }
 
@@ -114,10 +114,15 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     const remainingLabel = isSale ? 'المتبقي على الزبون' : 'المتبقي للمورد';
     const previousDebtLabel = isSale ? 'الدين السابق' : 'الدين السابق';
     const accountTotalLabel = isSale ? 'مبلغ الحساب الكلي' : 'مبلغ الحساب الكلي';
+    const titleText = isSaleReturn
+      ? 'فاتورة إرجاع بيع'
+      : isPurchaseReturn
+        ? 'فاتورة إرجاع شراء'
+        : isSale
+          ? (invoice.paymentMethod === 'آجل' ? 'فاتورة بيع آجلة' : 'فاتورة بيع')
+          : 'فاتورة شراء';
     const showItemNotes = rows.some((item) => lineNotes(item));
-    const printableHeader = assets.invoiceHeader
-      ? `<div class="header-image-wrap"><img class="header-image" src="${assets.invoiceHeader}" alt="invoice-header" onerror="this.closest('.header-image-wrap')?.remove()"></div>`
-      : '';
+    const headerImageSrc = assets.invoiceHeader || PUBLIC_INVOICE_HEADER_PATH;
     const metaRows = [
       [isReturn ? 'رقم الإرجاع' : 'رقم الفاتورة', invoice.returnNo || invoice.invoiceNo || '-'],
       ['التاريخ', dateValue],
@@ -156,13 +161,6 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
       `;
     }).join('');
 
-    const titleText = isSaleReturn
-      ? 'فاتورة إرجاع بيع'
-      : isPurchaseReturn
-        ? 'فاتورة إرجاع شراء'
-        : isSale
-          ? (invoice.paymentMethod === 'آجل' ? 'فاتورة بيع آجلة' : 'فاتورة بيع')
-          : 'فاتورة شراء';
     const html = `
 <!doctype html>
 <html lang="ar" dir="rtl">
@@ -180,6 +178,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     .invoice-inner { position: relative; z-index: 1; }
     .header-image-wrap { width: 100%; margin: 0 0 7mm; border-bottom: 1px solid #9ca3af; padding-bottom: 3mm; }
     .header-image { width: 100%; max-height: 46mm; object-fit: contain; display: block; }
+    .header-fallback-inline { display: none; }
     .header-fallback { display: grid; grid-template-columns: 1fr auto; gap: 6mm; align-items: end; padding-bottom: 3mm; border-bottom: 1px solid #9ca3af; margin-bottom: 7mm; }
     .brand-copy { text-align: right; }
     .brand-copy .name { font-size: 20pt; font-weight: 900; color: #202939; letter-spacing: 0.3px; }
@@ -239,8 +238,9 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
   <div class="invoice-sheet">
     ${assets.watermark ? `<div class="watermark"><img src="${assets.watermark}" alt=""></div>` : ''}
     <div class="invoice-inner">
-      ${printableHeader || `
-        <div class="header-fallback">
+      <div class="header-image-wrap">
+        <img class="header-image" src="${headerImageSrc}" alt="invoice-header" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
+        <div class="header-fallback header-fallback-inline">
           <div class="brand-copy">
             <div class="name">${esc(settings.storeName)}</div>
             <div class="sub">${esc(settings.storeAddress || '')}</div>
@@ -248,7 +248,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
           </div>
           ${assets.logo ? `<img class="brand-logo" src="${assets.logo}" alt="">` : `<div></div>`}
         </div>
-      `}
+      </div>
       <div class="invoice-title">${titleText}</div>
 
       <div class="meta-grid">
