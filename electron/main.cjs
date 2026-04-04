@@ -11,6 +11,62 @@ const logSyncError = (message, error) => {
   const details = error?.stack || error?.message || error || 'unknown_error';
   console.error(`[adwaa-sync] ${message}\n${details}`);
 };
+const logUpdater = (message, error = null) => {
+  const details = error ? `\n${error?.stack || error?.message || error}` : '';
+  console.log(`[adwaa-update] ${message}${details}`);
+};
+
+function resolveWindowIcon() {
+  if (process.platform !== 'win32') return undefined;
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'build', 'icon.ico');
+  }
+  return path.join(__dirname, '..', 'build', 'icon.ico');
+}
+
+function setupAutoUpdater() {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch (error) {
+    logUpdater('electron-updater is not installed.', error);
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    logUpdater('Checking for updates.');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    logUpdater(`Update available: ${info?.version || 'unknown_version'}`);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    logUpdater('No updates available.');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    const percent = Number(progress?.percent || 0).toFixed(1);
+    logUpdater(`Downloading update: ${percent}%`);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    logUpdater(`Update downloaded: ${info?.version || 'unknown_version'}. It will install on next app quit.`);
+  });
+
+  autoUpdater.on('error', (error) => {
+    logUpdater('Auto-update failed.', error);
+  });
+
+  autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+    logUpdater('Unable to check for updates.', error);
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -23,6 +79,7 @@ function createWindow() {
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#f8fbff',
+    icon: resolveWindowIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -51,6 +108,7 @@ app.whenReady().then(() => {
   runSyncCycle().catch((error) => {
     logSyncError('Initial desktop sync failed during app startup.', error);
   });
+  setupAutoUpdater();
   startSyncScheduler(10000);
   createWindow();
   app.on('activate', () => {
