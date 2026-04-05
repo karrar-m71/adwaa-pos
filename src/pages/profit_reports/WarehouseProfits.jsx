@@ -3,6 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 const fmt = n=>(n||0).toLocaleString('ar-IQ')+' د.ع';
+const toN=v=>{const x=+v;return Number.isFinite(x)?x:0};
 
 export default function WarehouseProfits({ user }) {
   const [sales,      setSales]      = useState([]);
@@ -27,7 +28,7 @@ export default function WarehouseProfits({ user }) {
   const whMap={};
   fSales.forEach(inv=>{
     const wh=inv.warehouse||'غير محدد';
-    const cogs=(inv.items||[]).reduce((s,it)=>{const p=products.find(p=>p.id===it.id);return s+(p?.buyPrice||0)*it.qty;},0);
+    const cogs=inv.cogs!=null?toN(inv.cogs):(inv.items||[]).reduce((s,it)=>{const qtyUnits=toN(it?.qtyUnits)||(it?.isPackage?toN(it?.qty)*toN(it?.packageQty||1):toN(it?.qty));const savedCost=toN(it?.buyPrice??it?.costPrice);const productCost=toN(products.find(p=>p.id===it?.id)?.buyPrice);return s+(savedCost||productCost)*qtyUnits;},0);
     if(!whMap[wh])whMap[wh]={name:wh,revenue:0,cogs:0,profit:0,invoiceCount:0};
     whMap[wh].revenue+=(inv.total||0);
     whMap[wh].cogs+=cogs;

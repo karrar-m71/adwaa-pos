@@ -17,6 +17,7 @@ const EMPTY_PRODUCT = {
   stock:'', minStock:'5', desc:'',
   hasPackage:false, packageTypeId:'',
   packageQty:'', packagePrice:'', packageBarcode:'',
+  currency: 'IQD', // عملة المادة: IQD (دينار) أو USD (دولار)
 };
 const resolveImageUrl = (value = '') => (isOfflineImageRef(value) ? getOfflineImagePreview(value) : value);
 
@@ -41,6 +42,7 @@ async function syncToMobile(id, data) {
       packagePrice:    data.packagePrice    || null,
       packageBarcode:  data.packageBarcode  || '',
       minStock:    data.minStock    || 5,
+      currency:    data.currency    || 'IQD', // عملة المادة
       updatedAt:   new Date().toISOString(),
     }, { merge: true });
     return true;
@@ -329,7 +331,10 @@ export default function Products({ user, embedded = false, initialSearch = '', o
             ?<img src={resolveImageUrl(p.imgUrl)} loading="lazy" decoding="async" alt="" style={{width:32,height:32,borderRadius:6,objectFit:'cover'}} onError={e=>e.target.style.display='none'}/>
             :<span style={{fontSize:22}}>{p.img||'📦'}</span>}
           <div>
-            <div style={{color:'#18243A',fontSize:13,fontWeight:600}}>{p.name}</div>
+            <div style={{display:'flex',alignItems:'center',gap:5}}>
+              <span style={{color:'#18243A',fontSize:13,fontWeight:600}}>{p.name}</span>
+              {p.currency==='USD'&&<span style={{background:'#3b82f622',border:'1px solid #3b82f644',borderRadius:10,padding:'1px 5px',color:'#3b82f6',fontSize:9,fontWeight:700}}>$USD</span>}
+            </div>
             <div style={{display:'flex',gap:5,marginTop:2}}>
               {p.barcode&&<span style={{color:'#94A3B8',fontSize:10}}>{p.barcode}</span>}
               {p.hasPackage&&<span style={{background:'#a78bfa22',border:'1px solid #a78bfa44',borderRadius:20,padding:'1px 6px',color:'#a78bfa',fontSize:9,fontWeight:700}}>معبأ</span>}
@@ -511,6 +516,17 @@ export default function Products({ user, embedded = false, initialSearch = '', o
                   {buyPriceValue > 0 && specialPriceValue > 0 ? `${specialProfitPercent.toFixed(1)}%` : '—'}
                 </div>
               </div>
+            </div>
+
+            {/* عملة المادة */}
+            <div>
+              <label style={{color:'#64748B',fontSize:12,display:'block',marginBottom:5}}>عملة المادة</label>
+              <select value={form.currency||'IQD'} onChange={e=>setForm(f=>({...f,currency:e.target.value}))}
+                style={{width:'100%',background:'#fff',border:'1px solid #D9E2F2',borderRadius:10,padding:'10px 12px',color:'#18243A',outline:'none',fontFamily:"'Cairo'"}}>
+                <option value="IQD">دينار عراقي (IQD)</option>
+                <option value="USD">دولار أمريكي (USD)</option>
+              </select>
+              {form.currency==='USD'&&<div style={{color:'#3b82f6',fontSize:10,marginTop:4}}>💡 الأسعار المدخلة ستُعرض بالدولار في الفاتورة</div>}
             </div>
 
             <div>

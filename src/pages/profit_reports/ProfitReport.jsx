@@ -4,6 +4,7 @@ import { db } from '../../firebase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const fmt = n=>(n||0).toLocaleString('ar-IQ')+' د.ع';
+const toN=v=>{const x=+v;return Number.isFinite(x)?x:0};
 
 export default function ProfitReport() {
   const [sales,    setSales]    = useState([]);
@@ -26,7 +27,7 @@ export default function ProfitReport() {
 
   // حساب ربح كل فاتورة
   const invoiceData = fSales.map(inv=>{
-    const cogs=inv.cogs ?? (inv.items||[]).reduce((s,it)=>{const p=products.find(p=>p.id===it.id);return s+(p?.buyPrice||0)*it.qty;},0);
+    const cogs=inv.cogs!=null?toN(inv.cogs):(inv.items||[]).reduce((s,it)=>{const qtyUnits=toN(it?.qtyUnits)||(it?.isPackage?toN(it?.qty)*toN(it?.packageQty||1):toN(it?.qty));const savedCost=toN(it?.buyPrice??it?.costPrice);const productCost=toN(products.find(p=>p.id===it?.id)?.buyPrice);return s+(savedCost||productCost)*qtyUnits;},0);
     const profit=inv.grossProfit ?? ((inv.total||0)-cogs);
     const margin=(inv.total||0)>0?(profit/(inv.total||0)*100).toFixed(1):0;
     return{...inv,cogs,profit,margin:Number(margin)};

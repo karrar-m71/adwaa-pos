@@ -3,6 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 const fmt = n=>(n||0).toLocaleString('ar-IQ')+' د.ع';
+const n=v=>{const x=+v;return Number.isFinite(x)?x:0};
 export default function LossSales({ user }) {
   const [sales,    setSales]    = useState([]);
   const [products, setProducts] = useState([]);
@@ -14,7 +15,7 @@ export default function LossSales({ user }) {
   },[]);
   const inRange=d=>{ if(!d)return true; if(dateFrom&&d<dateFrom)return false; if(dateTo&&d>dateTo)return false; return true; };
   const lossSales=sales.filter(s=>inRange(s.dateISO||s.date)).map(inv=>{
-    const cogs=(inv.items||[]).reduce((s,it)=>{const p=products.find(p=>p.id===it.id);return s+(p?.buyPrice||0)*it.qty;},0);
+    const cogs=n(inv.cogs)!=null&&inv.cogs!=null?n(inv.cogs):(inv.items||[]).reduce((s,it)=>{const qtyUnits=n(it?.qtyUnits)||(it?.isPackage?n(it?.qty)*n(it?.packageQty||1):n(it?.qty));const savedCost=n(it?.buyPrice??it?.costPrice);const productCost=n(products.find(p=>p.id===it?.id)?.buyPrice);return s+(savedCost||productCost)*qtyUnits;},0);
     const profit=(inv.total||0)-cogs;
     return{...inv,cogs,profit,margin:(inv.total||0)>0?(profit/(inv.total||0)*100).toFixed(1):0};
   }).filter(inv=>inv.profit<0).sort((a,b)=>a.profit-b.profit);

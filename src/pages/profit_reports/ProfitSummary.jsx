@@ -78,10 +78,17 @@ export default function ProfitSummary({ user }) {
   const grossRevenue  = fSales.reduce((s,i)=>s+toNum(i.total),0);
   const salesReturns  = fReturns.reduce((s,r)=>s+toNum(r.total),0);
   const netRevenue    = grossRevenue - salesReturns;
-  const cogs          = fSales.reduce((s,inv)=>s+(inv.items||[]).reduce((ss,it)=>{
-    const p=products.find(p=>p.id===it.id);
-    return ss + toNum(p?.buyPrice) * toNum(it?.qty);
-  },0),0);
+  const calcCogs=(inv)=>{
+    if(inv?.cogs!=null)return toNum(inv.cogs);
+    return(inv?.items||[]).reduce((ss,it)=>{
+      if(it?.costTotal!=null)return ss+toNum(it.costTotal);
+      const qtyUnits=toNum(it?.qtyUnits||(it?.isPackage?toNum(it?.qty)*toNum(it?.packageQty||1):toNum(it?.qty)));
+      const savedCost=toNum(it?.buyPrice??it?.costPrice);
+      const productCost=toNum(products.find(p=>p.id===it?.id)?.buyPrice);
+      return ss+((savedCost||productCost)*qtyUnits);
+    },0);
+  };
+  const cogs=fSales.reduce((s,inv)=>s+calcCogs(inv),0);
   const grossProfit   = netRevenue - cogs;
 
   const existingSaleLossKeys = new Set(

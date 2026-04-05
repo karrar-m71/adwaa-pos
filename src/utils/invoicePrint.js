@@ -30,6 +30,32 @@ function readSettings() {
   }
 }
 
+// ── إعدادات عرض الفاتورة (من صفحة إعدادات الفاتورة) ──
+const DEFAULT_DISPLAY_SETTINGS = {
+  showHeader:           true,
+  showPartyPhone:       true,
+  showPartyAddress:     false,
+  showExchangeRate:     true,
+  showPreviousDebt:     true,
+  showItemDiscount:     true,
+  showStatusStrip:      true,
+  showFooterSignatures: true,
+  showNotes:            false,
+  showSecondaryTotals:  true,
+  showAccountBox:       true,
+  compactMode:          false,
+};
+
+function readDisplaySettings() {
+  try {
+    const raw = localStorage.getItem('adwaa_invoice_settings');
+    const saved = raw ? JSON.parse(raw) : {};
+    return { ...DEFAULT_DISPLAY_SETTINGS, ...saved };
+  } catch {
+    return { ...DEFAULT_DISPLAY_SETTINGS };
+  }
+}
+
 function money(v) {
   return `${Number(v || 0).toLocaleString('ar-IQ')} د.ع`;
 }
@@ -83,6 +109,8 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     const includePrintButton = options.includePrintButton !== false;
     const settings = readSettings();
     const assets = readBrandAssets();
+    // قراءة إعدادات العرض من صفحة إعدادات الفاتورة
+    const ds = readDisplaySettings();
     const isSale = type === 'sale' || type === 'sale_return';
     const isReturn = type === 'sale_return' || type === 'purchase_return';
     const isSaleReturn = type === 'sale_return';
@@ -130,33 +158,40 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
       ['نوع الفاتورة', titleText],
       ['العملة', currencyCode === 'USD' ? 'دولار أمريكي' : 'دينار عراقي'],
       ['المنظم', createdBy],
-      ['الهاتف', partyPhone],
-      ['العنوان', partyAddress],
-      ...(currencyCode === 'USD' ? [['سعر الصرف', exchangeRate]] : []),
+      // الهاتف: يُخفى إذا كانت الإعداد مُعطّلاً أو كانت القيمة فارغة
+      ...(ds.showPartyPhone && partyPhone && partyPhone !== '-' ? [['الهاتف', partyPhone]] : []),
+      // العنوان: يُخفى إذا كانت الإعداد مُعطّلاً أو كانت القيمة فارغة
+      ...(ds.showPartyAddress && partyAddress && partyAddress !== '-' ? [['العنوان', partyAddress]] : []),
+      // سعر الصرف: يُخفى حسب الإعداد
+      ...(currencyCode === 'USD' && ds.showExchangeRate ? [['سعر الصرف', exchangeRate]] : []),
     ];
     const summaryRows = [
       ['مجموع القائمة', moneyWithDisplay(subtotal, currencyCode, exchangeRate)],
-      ['الخصم', moneyWithDisplay(discountValue, currencyCode, exchangeRate)],
+      // الخصم: يُخفى إذا لم يكن هناك خصم
+      ...(discountValue > 0 || ds.showItemDiscount ? [['الخصم', moneyWithDisplay(discountValue, currencyCode, exchangeRate)]] : []),
       ['المبلغ النهائي', moneyWithDisplay(total, currencyCode, exchangeRate), 'is-strong'],
       ['المدفوع', moneyWithDisplay(paid, currencyCode, exchangeRate)],
       ['الواصل الفعلي', moneyWithDisplay(receivedAmount, currencyCode, exchangeRate)],
       ['الباقي / المتبقي', moneyWithDisplay(due, currencyCode, exchangeRate)],
       ...(changeAmount > 0 ? [['الباقي للزبون', moneyWithDisplay(changeAmount, currencyCode, exchangeRate)]] : []),
-      ...(secondaryTotals ? [['ما يعادل بالدينار', money(total)]] : []),
+      // "ما يعادل بالدينار": حسب الإعداد
+      ...(secondaryTotals && ds.showSecondaryTotals ? [['ما يعادل بالدينار', money(total)]] : []),
     ];
 
+    // إظهار عمود الخصم فقط إذا كان الإعداد مُفعَّلاً
+    const showDiscountCol = ds.showItemDiscount;
     const rowsHtml = rows.map((item, idx) => {
       const unitPrice = Number(item?.price ?? item?.buyPrice ?? 0);
       const itemDiscount = lineDiscount(item);
       return `
         <tr>
           <td>${idx + 1}</td>
-          <td>${esc(item?.name || '-')}</td>
+          <td class="item-cell">${esc(item?.name || '-')}</td>
           <td>${Number(item?.qty ?? item?.returnQty ?? 0)}</td>
           <td>${moneyWithDisplay(unitPrice, currencyCode, exchangeRate)}</td>
-          <td>${moneyWithDisplay(itemDiscount, currencyCode, exchangeRate)}</td>
+          ${showDiscountCol ? `<td>${moneyWithDisplay(itemDiscount, currencyCode, exchangeRate)}</td>` : ''}
           <td>${moneyWithDisplay(lineTotal(item), currencyCode, exchangeRate)}</td>
-          ${showItemNotes ? `<td>${esc(lineNotes(item) || '-')}</td>` : ''}
+          ${showItemNotes ? `<td class="notes-cell">${esc(lineNotes(item) || '-')}</td>` : ''}
         </tr>
       `;
     }).join('');
@@ -201,11 +236,11 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .items-table { border: 1px solid #6b7280; }
     .items-table col.col-index { width: 8%; }
-    .items-table col.col-item { width: ${showItemNotes ? '34%' : '42%'}; }
+    .items-table col.col-item { width: ${showItemNotes ? '30%' : (showDiscountCol ? '38%' : '48%')}; }
     .items-table col.col-qty { width: 10%; }
     .items-table col.col-price { width: 15%; }
     .items-table col.col-discount { width: 13%; }
-    .items-table col.col-total { width: 14%; }
+    .items-table col.col-total { width: ${showDiscountCol ? '14%' : '19%'}; }
     .items-table col.col-notes { width: 16%; }
     th, td { border: 1px solid #6b7280; padding: 2.4mm 2.2mm; font-size: 9.3pt; vertical-align: middle; }
     thead th { background: #eef2f7; color: #111827; font-weight: 800; text-align: center; }
@@ -232,12 +267,33 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
       .status-strip { gap: 2mm; }
       th, td { font-size: 9pt; }
     }
+    ${ds.compactMode ? `
+    /* وضع الضغط: توفير الورق بتقليل المسافات */
+    @page { margin: 4mm 5mm 5mm; }
+    .meta-label, .meta-value { padding: 1.4mm 2mm; font-size: 8.8pt; }
+    .meta-item { min-height: 8mm; }
+    th, td { padding: 1.5mm 1.8mm; font-size: 8.5pt; }
+    .status-chip { padding: 1.5mm 2mm; min-height: 8mm; }
+    .status-chip .label { font-size: 7.8pt; }
+    .status-chip .value { font-size: 9pt; margin-top: 0.5mm; }
+    .summary-row > div { padding: 1.5mm 2mm; font-size: 8.8pt; }
+    .section { margin-top: 2.5mm; }
+    .invoice-title { margin: 0 0 2.5mm; font-size: 15pt; }
+    .header-image-wrap { margin: 0 0 4mm; padding-bottom: 2mm; }
+    .header-image { max-height: 30mm; }
+    .notes-box { min-height: 10mm; }
+    .notes-body { min-height: 6mm; padding: 2mm; font-size: 8.8pt; }
+    .footer-line { margin-top: 3mm; font-size: 8.5pt; }
+    .footer-line .line { margin-top: 5mm; }
+    .footer { margin-top: 2mm; font-size: 8.2pt; }
+    ` : ''}
   </style>
 </head>
 <body>
   <div class="invoice-sheet">
     ${assets.watermark ? `<div class="watermark"><img src="${assets.watermark}" alt=""></div>` : ''}
     <div class="invoice-inner">
+      ${ds.showHeader ? `
       <div class="header-image-wrap">
         <img class="header-image" src="${headerImageSrc}" alt="invoice-header" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
         <div class="header-fallback header-fallback-inline">
@@ -249,6 +305,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
           ${assets.logo ? `<img class="brand-logo" src="${assets.logo}" alt="">` : `<div></div>`}
         </div>
       </div>
+      ` : ''}
       <div class="invoice-title">${titleText}</div>
 
       <div class="meta-grid">
@@ -260,12 +317,14 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
         `).join('')}
       </div>
 
+      ${ds.showStatusStrip ? `
       <div class="status-strip">
         <div class="status-chip"><div class="label">الدفع</div><div class="value">${esc(invoice.paymentMethod || '-')}</div></div>
         <div class="status-chip"><div class="label">حالة السداد</div><div class="value">${esc(paymentStatus)}</div></div>
-        <div class="status-chip"><div class="label">${previousDebtLabel}</div><div class="value">${moneyWithDisplay(previousDebt, currencyCode, exchangeRate)}</div></div>
+        ${ds.showPreviousDebt ? `<div class="status-chip"><div class="label">${previousDebtLabel}</div><div class="value">${moneyWithDisplay(previousDebt, currencyCode, exchangeRate)}</div></div>` : ''}
         <div class="status-chip"><div class="label">${accountTotalLabel}</div><div class="value">${moneyWithDisplay(accountTotal, currencyCode, exchangeRate)}</div></div>
       </div>
+      ` : ''}
 
       <div class="section">
         <div class="section-title">المفردات</div>
@@ -275,7 +334,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
             <col class="col-item" />
             <col class="col-qty" />
             <col class="col-price" />
-            <col class="col-discount" />
+            ${showDiscountCol ? '<col class="col-discount" />' : ''}
             <col class="col-total" />
             ${showItemNotes ? '<col class="col-notes" />' : ''}
           </colgroup>
@@ -285,7 +344,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
               <th>المادة</th>
               <th>العدد</th>
               <th>السعر</th>
-              <th>خصم المادة</th>
+              ${showDiscountCol ? '<th>خصم المادة</th>' : ''}
               <th>المجموع</th>
               ${showItemNotes ? '<th>الملاحظات</th>' : ''}
             </tr>
@@ -297,6 +356,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
       </div>
 
       <div class="summary-layout">
+        ${ds.showAccountBox ? `
         <div class="summary-box">
           <div class="summary-head">الحسابات</div>
           <div class="summary-row"><div>${settlementLabel}</div><div>${moneyWithDisplay(receivedAmount, currencyCode, exchangeRate)}</div></div>
@@ -305,6 +365,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
           <div class="summary-row"><div>الحالة</div><div>${esc(paymentStatus)}</div></div>
           <div class="summary-row"><div>${accountBoxTitle}</div><div>${moneyWithDisplay(accountTotal, currencyCode, exchangeRate)}</div></div>
         </div>
+        ` : ''}
         <div class="summary-box">
           <div class="summary-head">المجاميع</div>
           ${summaryRows.map(([label, value, className = '']) => `
@@ -316,16 +377,20 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
         </div>
       </div>
 
+      ${(invoice.notes || ds.showNotes) ? `
       <div class="notes-box section">
         <div class="notes-head">الملاحظات</div>
         <div class="notes-body">${esc(invoice.notes || '')}</div>
       </div>
+      ` : ''}
 
+      ${ds.showFooterSignatures ? `
       <div class="footer-line">
         <div>اسم المنظم<div class="line"></div>${esc(invoice.cashier || invoice.addedBy || '-')}</div>
         <div>التوقيع<div class="line"></div>&nbsp;</div>
         <div>اسم المستلم<div class="line"></div>${esc(party)}</div>
       </div>
+      ` : ''}
 
       <div class="footer">${esc(settings.invoiceFooter || '')}</div>
       ${includePrintButton ? `
