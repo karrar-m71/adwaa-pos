@@ -333,6 +333,11 @@ export function openProfessionalStatementPrint(statement, options = {}) {
 
 async function createPdfBlobFromHtml(html) {
   const parsed = new DOMParser().parseFromString(html, 'text/html');
+  for (const el of parsed.body.querySelectorAll('*')) {
+    for (const attr of [...el.attributes]) {
+      if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+    }
+  }
   const styleText = Array.from(parsed.querySelectorAll('style')).map((s) => s.textContent || '').join('\n');
   const bodyHtml = parsed.body?.innerHTML || '';
 

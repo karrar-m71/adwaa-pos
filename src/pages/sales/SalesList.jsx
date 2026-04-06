@@ -81,11 +81,18 @@ export default function SalesList({ user }) {
     [products],
   );
 
-  const filtered = useMemo(() => products.filter((product) => {
-    const matchesSearch = !deferredSearch || product.name?.includes(deferredSearch) || product.barcode?.includes(deferredSearch) || product.packageBarcode?.includes(deferredSearch);
-    const matchesCategory = catFilter === 'الكل' || product.cat === catFilter;
-    return matchesSearch && matchesCategory;
-  }), [products, catFilter, deferredSearch]);
+  const filtered = useMemo(() => {
+    const q = String(deferredSearch || '').trim();
+    return products.filter((product) => {
+      const matchesSearch = !q
+        || String(product.name || '').includes(q)
+        || String(product.barcode || '').includes(q)
+        || String(product.packageBarcode || '').includes(q)
+        || String(product.cat || '').includes(q);
+      const matchesCategory = catFilter === 'الكل' || product.cat === catFilter;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, catFilter, deferredSearch]);
 
   const inferSellTypeFromSearch = (product, queryText = '') => {
     const normalizedQuery = String(queryText || '').trim().toLowerCase();
@@ -278,7 +285,11 @@ export default function SalesList({ user }) {
       batch.delete(doc(db, 'pos_sales', sale.id));
       await batch.commit();
     } catch (error) {
-      alert('تعذر حذف الفاتورة: ' + getErrorMessage(error));
+      const msg = String(error?.message || '');
+      const display = msg.includes('الفاتورة غير موجودة') ? 'الفاتورة غير موجودة أو تم حذفها مسبقاً'
+        : msg.includes('المادة غير موجودة') ? msg
+        : getErrorMessage(error, 'تعذر حذف الفاتورة');
+      alert(display);
     }
   };
 

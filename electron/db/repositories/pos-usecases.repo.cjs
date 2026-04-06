@@ -330,7 +330,8 @@ function createSaleWithAccountingTx(input = {}) {
       productRows.set(productId, productRow);
     }
 
-    // Validate stock first.
+    // Validate stock first (skip if allowNeg is explicitly enabled).
+    const allowNeg = Boolean(payload.allowNeg);
     for (const item of items) {
       const productId = String(item.id || item.productId || '').trim();
       const row = productRows.get(productId);
@@ -340,7 +341,7 @@ function createSaleWithAccountingTx(input = {}) {
       const isPackage = Boolean(item.isPackage);
       const stockUsed = isPackage ? qty * packageQty : qty;
       if (stockUsed <= 0) throw new Error(`Invalid qty for ${productId}`);
-      if (Number(product.stock || 0) < stockUsed) throw new Error(`Insufficient stock for ${product.name || productId}`);
+      if (!allowNeg && Number(product.stock || 0) < stockUsed) throw new Error(`Insufficient stock for ${product.name || productId}`);
     }
 
     // Apply stock mutations.
@@ -547,13 +548,14 @@ function updateSaleWithAccountingTx(input = {}) {
     const newQtyMap = sumQtyByProduct(normalizedItems);
     const productIds = [...new Set([...Object.keys(oldQtyMap), ...Object.keys(newQtyMap)])];
 
+    const allowNeg = Boolean(payload.allowNeg);
     for (const productId of productIds) {
       const row = getByDocPathTx(db, `pos_products/${productId}`);
       if (!row) throw new Error(`Product not found: ${productId}`);
       const product = row.data_json ? JSON.parse(row.data_json) : {};
       const availableUnits = Number(product.stock || 0) + Number(oldQtyMap[productId] || 0);
       const neededUnits = Number(newQtyMap[productId] || 0);
-      if (availableUnits < neededUnits) throw new Error(`Insufficient stock for ${product.name || productId}`);
+      if (!allowNeg && availableUnits < neededUnits) throw new Error(`Insufficient stock for ${product.name || productId}`);
     }
 
     for (const productId of productIds) {

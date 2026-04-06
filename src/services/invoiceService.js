@@ -181,6 +181,7 @@ const buildUpdatePayload = ({ invoice, draft, user }) => {
 
   return {
     id: invoice.id,
+    allowNeg: Boolean(draft.allowNeg),
     invoiceNo: invoice.invoiceNo,
     customer: String(draft.customer || '').trim() || 'زبون عام',
     customerId: draft.customerId || invoice.customerId || '',
@@ -248,7 +249,7 @@ async function updateInvoiceInFirestore(payload, context = {}) {
     if (!product) throw new Error(`المادة غير موجودة: ${productId}`);
     const available = Number(product.stock || 0) + Number(oldQtyMap[productId] || 0);
     const requested = Number(newQtyMap[productId] || 0);
-    if (available < requested) throw new Error(`الكمية غير كافية للمادة: ${product.name || productId}`);
+    if (!payload.allowNeg && available < requested) throw new Error(`الكمية غير كافية للمادة: ${product.name || productId}`);
     batch.set(doc(db, 'pos_products', productId), {
       stock: available - requested,
       soldCount: Math.max(0, Number(product.soldCount || 0) - Number(oldQtyMap[productId] || 0) + requested),
@@ -447,9 +448,17 @@ export async function updateInvoice(draft, context = {}) {
 
 export function explainInvoiceError(error, fallback = 'تعذر تنفيذ العملية على الفاتورة') {
   const raw = String(error?.message || '');
-  if (raw.toLowerCase().includes('insufficient stock')) {
+  const lower = raw.toLowerCase();
+  if (lower.includes('insufficient stock')) {
     const productName = raw.split('for ').pop() || '';
     return `الكمية غير كافية${productName ? ` للمادة: ${productName}` : ''}`;
+  }
+  if (raw.includes('الكمية غير كافية')) return raw;
+  if (raw.includes('المادة غير موجودة')) return raw;
+  if (lower.includes('invoice not found') || raw.includes('الفاتورة غير موجودة')) return 'الفاتورة غير موجودة أو تم حذفها';
+  if (lower.includes('product not found')) {
+    const productId = raw.split(': ').pop() || '';
+    return `المادة غير موجودة${productId ? `: ${productId}` : ''}`;
   }
   return getErrorMessage(error, fallback);
 }

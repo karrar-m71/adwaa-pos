@@ -1,6 +1,39 @@
 const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+
+// Load environment variables from an external file — never bundled inside the binary.
+// In development : <project-root>/.env.local
+// In production  : <userData>/.env  (e.g. %APPDATA%/Adwaa POS/.env on Windows)
+//   → The file must be placed there by the installer or the administrator.
+//   → Must be called inside app.whenReady() so that app.getPath('userData') is available.
+function loadEnvFile() {
+  const candidates = app.isPackaged
+    ? [path.join(app.getPath('userData'), '.env')]
+    : [
+        path.join(__dirname, '..', '.env.local'),
+        path.join(__dirname, '..', '.env'),
+      ];
+
+  for (const envPath of candidates) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx < 1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim();
+        if (key && !(key in process.env)) process.env[key] = val;
+      }
+      return;
+    } catch {
+      // file not found — try next candidate
+    }
+  }
+}
+
 const { initDb, getDb, getDbPath } = require('./db/sqlite.cjs');
 const { registerDbHandlers } = require('./db/ipc/db-handlers.cjs');
 const { registerSyncHandlers } = require('./db/ipc/sync-handlers.cjs');
@@ -85,7 +118,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -136,7 +169,7 @@ async function printHtmlDocument({ html = '', title = 'Adwaa POS Print' } = {}) 
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      sandbox: false,
+      sandbox: true,
     },
   });
   try {
@@ -158,6 +191,7 @@ async function printHtmlDocument({ html = '', title = 'Adwaa POS Print' } = {}) 
 }
 
 app.whenReady().then(() => {
+  loadEnvFile();
   initDb(app.getPath('userData'));
   registerDbHandlers();
   registerSyncHandlers();

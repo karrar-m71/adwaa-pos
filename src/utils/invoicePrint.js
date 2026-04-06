@@ -183,10 +183,15 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     const rowsHtml = rows.map((item, idx) => {
       const unitPrice = Number(item?.price ?? item?.buyPrice ?? 0);
       const itemDiscount = lineDiscount(item);
+      const isPackageItem = Boolean(item?.isPackage);
+      const pkgName = String(item?.packageName || '').trim();
+      const sellBadge = isPackageItem
+        ? `<span class="sell-type-badge">${esc(pkgName || 'كرتون')}</span>`
+        : '';
       return `
         <tr>
           <td>${idx + 1}</td>
-          <td class="item-cell">${esc(item?.name || '-')}</td>
+          <td class="item-cell">${sellBadge}${esc(item?.name || '-')}</td>
           <td>${Number(item?.qty ?? item?.returnQty ?? 0)}</td>
           <td>${moneyWithDisplay(unitPrice, currencyCode, exchangeRate)}</td>
           ${showDiscountCol ? `<td>${moneyWithDisplay(itemDiscount, currencyCode, exchangeRate)}</td>` : ''}
@@ -243,17 +248,26 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
     .items-table col.col-total { width: ${showDiscountCol ? '14%' : '19%'}; }
     .items-table col.col-notes { width: 16%; }
     th, td { border: 1px solid #6b7280; padding: 2.4mm 2.2mm; font-size: 9.3pt; vertical-align: middle; }
-    thead th { background: #eef2f7; color: #111827; font-weight: 800; text-align: center; }
+    thead th { background: #1e3a5f; color: #fff; font-weight: 800; text-align: center; }
     tbody td { text-align: center; }
     tbody td.item-cell, tbody td.notes-cell { text-align: right; }
+    tbody tr:nth-child(even) td { background: #f8fafc; }
+    tbody tr:hover td { background: #f0f4f8; }
+    .sell-type-badge { display: inline-block; font-size: 7pt; color: #475569; background: #e2e8f0; border-radius: 2px; padding: 0 2px; margin-right: 2px; vertical-align: middle; }
     .summary-layout { display: grid; grid-template-columns: 1.2fr 0.9fr; gap: 4mm; margin-top: 5mm; align-items: start; }
+    .summary-layout.full-width { grid-template-columns: 1fr; }
     .summary-box, .account-box, .notes-box { border: 1px solid #7c8798; background: #fff; }
-    .summary-head, .notes-head { background: #f3f4f6; color: #1f2937; font-size: 9.8pt; font-weight: 800; padding: 2.5mm 3mm; border-bottom: 1px solid #cbd5e1; }
+    .summary-head, .notes-head { background: #1e3a5f; color: #fff; font-size: 9.8pt; font-weight: 800; padding: 2.5mm 3mm; border-bottom: 1px solid #cbd5e1; }
     .summary-row { display: grid; grid-template-columns: 1fr 1fr; }
     .summary-row > div { padding: 2.6mm 3mm; border-bottom: 1px solid #e5e7eb; font-size: 9.4pt; }
     .summary-row > div:first-child { background: #fafafa; font-weight: 700; color: #334155; }
     .summary-row:last-child > div { border-bottom: none; }
-    .summary-row.is-strong > div { font-weight: 900; font-size: 10pt; }
+    .summary-row.is-strong > div { font-weight: 900; font-size: 10.5pt; background: #f0f9ff; color: #0f4c81; border-top: 1.5px solid #93c5fd; }
+    @media print {
+      .items-table { page-break-inside: auto; }
+      .items-table tr { page-break-inside: avoid; }
+      .summary-layout, .notes-box, .footer-line { page-break-inside: avoid; }
+    }
     .notes-box { min-height: ${invoice.notes ? '30mm' : '14mm'}; }
     .notes-body { padding: 3mm; font-size: 9.4pt; color: #1f2937; min-height: ${invoice.notes ? '22mm' : '8mm'}; }
     .footer-line { margin-top: 6mm; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5mm; text-align: center; font-size: 9.2pt; }
@@ -355,7 +369,7 @@ export function buildProfessionalInvoiceHtml(invoice, type = 'sale', options = {
         </table>
       </div>
 
-      <div class="summary-layout">
+      <div class="summary-layout${ds.showAccountBox ? '' : ' full-width'}">
         ${ds.showAccountBox ? `
         <div class="summary-box">
           <div class="summary-head">الحسابات</div>

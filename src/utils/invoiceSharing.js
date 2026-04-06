@@ -120,9 +120,17 @@ function toWhatsAppDigits(normalizedPhone) {
   return String(normalizedPhone || '').replace(/\D/g, '');
 }
 
+function stripEventHandlers(el) {
+  for (const attr of [...el.attributes]) {
+    if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+  }
+  for (const child of el.children) stripEventHandlers(child);
+}
+
 async function createInvoicePdfBlob(invoice, type) {
   const html = buildProfessionalInvoiceHtml(invoice, type, { includePrintButton: false });
   const parsed = new DOMParser().parseFromString(html, 'text/html');
+  stripEventHandlers(parsed.body);
   const styleText = Array.from(parsed.querySelectorAll('style')).map((s) => s.textContent || '').join('\n');
   const bodyHtml = parsed.body?.innerHTML || '';
 

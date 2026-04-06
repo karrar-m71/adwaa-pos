@@ -1,21 +1,21 @@
 let cached = null;
 
-const FIREBASE_CONFIG = Object.freeze({
-  apiKey: 'AIzaSyAZdIbmvj7HD1SNp7ALr9gsV0sOf7MgNMo',
-  authDomain: 'adwaa-app-e7aaf.firebaseapp.com',
-  projectId: 'adwaa-app-e7aaf',
-  storageBucket: 'adwaa-app-e7aaf.firebasestorage.app',
-  messagingSenderId: '288505641994',
-  appId: '1:288505641994:web:59e6eaf78300cfc05bb3f3',
-});
-
 function logSyncError(message, error) {
   const details = error?.stack || error?.message || error || 'unknown_error';
   console.error(`[adwaa-sync] ${message}\n${details}`);
 }
 
 function readFirebaseConfig() {
-  const missingKeys = Object.entries(FIREBASE_CONFIG)
+  const config = {
+    apiKey:            process.env.VITE_FIREBASE_API_KEY,
+    authDomain:        process.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId:         process.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket:     process.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId:             process.env.VITE_FIREBASE_APP_ID,
+  };
+
+  const missingKeys = Object.entries(config)
     .filter(([, value]) => !value)
     .map(([key]) => key);
 
@@ -23,7 +23,7 @@ function readFirebaseConfig() {
     throw new Error(`Desktop Firebase config is incomplete: ${missingKeys.join(', ')}`);
   }
 
-  return FIREBASE_CONFIG;
+  return Object.freeze(config);
 }
 
 async function getFirestoreClient() {

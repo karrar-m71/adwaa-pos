@@ -184,6 +184,7 @@ export const SalesCartPanel = memo(function SalesCartPanel({
           received,
           currency,
           exchangeRate,
+          allowNeg: Boolean(allowNeg),
           items: cart,
         });
         setDone(updatedInvoice || {
@@ -292,6 +293,7 @@ export const SalesCartPanel = memo(function SalesCartPanel({
           cashier: user.name,
           currency,
           exchangeRate: currency === 'USD' ? exchangeRate : 1,
+          allowNeg: Boolean(allowNeg),
         });
         setDone({ ...localResult, localId: localResult?.id, localSaved: true });
         runLocalSync().catch(() => null);
